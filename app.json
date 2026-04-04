@@ -1,0 +1,85 @@
+{
+  "expo": {
+    "name": "EpexFit",
+    "slug": "epexfit",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./src/assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#0A0A0F"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.epexlogics.epexfit",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "EpexFit needs access to location to track your running and walking routes.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "EpexFit needs access to location to track your running and walking routes.",
+        "NSCameraUsageDescription": "EpexFit needs access to camera to take photos after activities.",
+        "NSPhotoLibraryUsageDescription": "EpexFit needs access to photo library to save activity photos."
+      }
+    },
+    "android": {
+      "package": "com.epexlogics.epexfit",
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
+    },
+    "web": {
+      "favicon": "./src/assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow EpexFit to track your workouts."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow EpexFit to take photos after your activities."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./src/assets/notification-icon.png",
+          "color": "#FC4C02"
+        }
+      ],
+       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow EpexFit to access your photos to set profile picture."
+        }
+      ],
+      "expo-asset"
+    ],
+    "owner": "epexlogic",
+    "extra": {
+      "eas": {
+        "projectId": "fa091abc-6a83-4a10-9065-7a660ed3b516"
+      }
+    },
+    "scheme": "epexfit"
+  }
+}
