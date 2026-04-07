@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Svg, { Path, Circle, Rect, Line, Polyline } from 'react-native-svg';
 import { useTheme } from '../context/ThemeContext';
+import { borderRadius } from '../constants/theme';
 
 import HomeScreen from '../screens/main/HomeScreen';
 import ActivityScreen from '../screens/main/ActivityScreen';
@@ -20,6 +21,11 @@ import ActiveWorkoutScreen from '../screens/main/ActiveWorkoutScreen';
 import ProgressScreen from '../screens/main/ProgressScreen';
 import FoodLogScreen from '../screens/main/FoodLogScreen';
 import BodyMeasurementsScreen from '../screens/main/BodyMeasurementsScreen';
+import UserSearchScreen from '../screens/main/UserSearchScreen';
+import SocialFeedScreen from '../screens/main/SocialFeedScreen';
+import UserProfileScreen from '../screens/main/UserProfileScreen';
+import FollowersListScreen from '../screens/main/FollowersListScreen';
+import CommentsScreen from '../screens/main/CommentsScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -65,6 +71,17 @@ function WorkoutsIcon({ color, focused }: { color: string; focused: boolean }) {
   );
 }
 
+function SocialIcon({ color, focused }: { color: string; focused: boolean }) {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+      <Circle cx="9" cy="7" r="3" fill={focused ? color : 'none'} fillOpacity={focused ? 0.25 : 0} stroke={color} strokeWidth={focused ? 2 : 1.6} />
+      <Circle cx="17" cy="9" r="2" stroke={color} strokeWidth={focused ? 2 : 1.6} />
+      <Path d="M2 20C2 17 5.13 15 9 15C12.87 15 16 17 16 20" stroke={color} strokeWidth={focused ? 2 : 1.6} strokeLinecap="round" />
+      <Path d="M17 14C19.5 14 22 15.5 22 18" stroke={color} strokeWidth={focused ? 2 : 1.6} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 function ProfileIcon({ color, focused }: { color: string; focused: boolean }) {
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
@@ -76,8 +93,7 @@ function ProfileIcon({ color, focused }: { color: string; focused: boolean }) {
 
 function MainTabs() {
   const { colors, isDark } = useTheme();
-  const tabBg = isDark ? '#0F1012' : '#FFFFFF';
-  const inactiveColor = isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)';
+  const inactiveColor = isDark ? 'rgba(148,163,184,0.45)' : 'rgba(100,116,139,0.55)';
 
   return (
     <Tab.Navigator
@@ -88,6 +104,7 @@ function MainTabs() {
           if (route.name === 'Activity') return <ActivityIcon {...props} />;
           if (route.name === 'Progress') return <ProgressIcon {...props} />;
           if (route.name === 'Workouts') return <WorkoutsIcon {...props} />;
+          if (route.name === 'Social')   return <SocialIcon {...props} />;
           if (route.name === 'Profile')  return <ProfileIcon {...props} />;
           return null;
         },
@@ -95,23 +112,25 @@ function MainTabs() {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: inactiveColor,
         tabBarStyle: {
-          backgroundColor: tabBg,
+          backgroundColor: colors.tabBarBg,
           borderTopWidth: 0,
-          marginHorizontal: 14,
-          marginBottom: Platform.OS === 'ios' ? 26 : 14,
-          borderRadius: 22,
-          height: 64,
-          paddingBottom: 0, paddingTop: 0,
+          marginHorizontal: 16,
+          marginBottom: Platform.OS === 'ios' ? 28 : 16,
+          borderRadius: borderRadius.xl,
+          height: 66,
+          paddingBottom: 0,
+          paddingTop: 0,
           position: 'absolute',
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 8 },
-          shadowOpacity: isDark ? 0.7 : 0.18,
-          shadowRadius: 24, elevation: 16,
+          shadowColor: isDark ? '#22D3EE' : '#0F172A',
+          shadowOffset: { width: 0, height: 10 },
+          shadowOpacity: isDark ? 0.25 : 0.12,
+          shadowRadius: 28,
+          elevation: 18,
           borderWidth: 1,
-          borderColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)',
+          borderColor: isDark ? 'rgba(34,211,238,0.12)' : 'rgba(15,23,42,0.06)',
         },
         tabBarItemStyle: { paddingTop: 10, paddingBottom: 6 },
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.4, marginTop: -2 },
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '800', letterSpacing: 0.35, marginTop: -2 },
         headerShown: false,
       })}
     >
@@ -119,6 +138,7 @@ function MainTabs() {
       <Tab.Screen name="Activity" component={ActivityScreen} />
       <Tab.Screen name="Progress" component={ProgressScreen} />
       <Tab.Screen name="Workouts" component={WorkoutsListScreen} />
+      <Tab.Screen name="Social"   component={SocialFeedScreen} />
       <Tab.Screen name="Profile"  component={ProfileScreen} />
     </Tab.Navigator>
   );
@@ -132,7 +152,7 @@ export default function MainNavigator() {
       screenOptions={{
         headerStyle: { backgroundColor: colors.surface },
         headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: '800', fontSize: 17, letterSpacing: -0.3 },
+        headerTitleStyle: { fontWeight: '800', fontSize: 17 },
         headerShadowVisible: false,
         contentStyle: { backgroundColor: colors.background },
         headerBackTitleVisible: false,
@@ -148,6 +168,11 @@ export default function MainNavigator() {
       <Stack.Screen name="FoodLog"       component={FoodLogScreen}       options={{ title: 'Food Log' }} />
       <Stack.Screen name="Goals"              component={GoalsScreen}              options={{ title: 'Goals' }} />
       <Stack.Screen name="BodyMeasurements"   component={BodyMeasurementsScreen}   options={{ headerShown: false }} />
+      <Stack.Screen name="SocialFeed"         component={SocialFeedScreen}         options={{ title: 'Community' }} />
+      <Stack.Screen name="UserSearch"         component={UserSearchScreen}         options={{ headerShown: false }} />
+      <Stack.Screen name="UserProfile"        component={UserProfileScreen}        options={{ headerShown: false }} />
+      <Stack.Screen name="FollowersList"      component={FollowersListScreen}      options={{ headerShown: false }} />
+      <Stack.Screen name="Comments"           component={CommentsScreen}           options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

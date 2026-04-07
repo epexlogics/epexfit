@@ -9,12 +9,14 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, Platform, RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../services/supabase';
+import { socialService } from '../../services/socialService';
 import AppIcon from '../../components/AppIcon';
 import { borderRadius, spacing } from '../../constants/theme';
-import moment from 'moment';
+import dayjs from '../../utils/dayjs';
 
 interface Measurement {
   id: string;
@@ -54,6 +56,7 @@ function deltaColor(key: string, d: string): string {
 
 export default function BodyMeasurementsScreen({ navigation }: any) {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const accent = colors.primary;
 
@@ -95,6 +98,12 @@ export default function BodyMeasurementsScreen({ navigation }: any) {
 
       const { error } = await supabase.from('body_measurements').insert(payload);
       if (error) throw error;
+
+      // Publish weight to social feed if weight was logged
+      if (payload.weight != null) {
+        socialService.publishFeedEvent('weight_logged', { weight: payload.weight, unit: 'kg' });
+      }
+
       setForm({});
       setShowForm(false);
       await load();
@@ -109,12 +118,13 @@ export default function BodyMeasurementsScreen({ navigation }: any) {
   const previous = measurements[1] ?? null;
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} />}
     >
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <AppIcon name="chevron-left" size={22} color={colors.text} />
         </TouchableOpacity>
@@ -172,7 +182,7 @@ export default function BodyMeasurementsScreen({ navigation }: any) {
       {latest && (
         <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>Latest Entry</Text>
-          <Text style={[styles.cardDate, { color: colors.textSecondary }]}>{moment(latest.date).format('MMM D, YYYY')}</Text>
+          <Text style={[styles.cardDate, { color: colors.textSecondary }]}>{dayjs(latest.date).format('MMM D, YYYY')}</Text>
           <View style={styles.metricsGrid}>
             {FIELDS.map((f) => {
               const val = latest[f.key];
@@ -203,7 +213,7 @@ export default function BodyMeasurementsScreen({ navigation }: any) {
             const prev = measurements.find((_, j) => j === measurements.indexOf(m) + 1);
             return (
               <View key={m.id} style={[styles.historyRow, { borderBottomColor: colors.divider }]}>
-                <Text style={[styles.historyDate, { color: colors.textSecondary }]}>{moment(m.date).format('MMM D')}</Text>
+                <Text style={[styles.historyDate, { color: colors.textSecondary }]}>{dayjs(m.date).format('MMM D')}</Text>
                 <View style={styles.historyVals}>
                   {FIELDS.filter(f => m[f.key] != null).slice(0, 3).map(f => (
                     <Text key={f.key} style={[styles.historyVal, { color: colors.text }]}>
@@ -228,12 +238,13 @@ export default function BodyMeasurementsScreen({ navigation }: any) {
         </View>
       )}
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingBottom: 12, gap: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, gap: 12 },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, fontSize: 22, fontWeight: '900', letterSpacing: -0.5 },
   addBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },

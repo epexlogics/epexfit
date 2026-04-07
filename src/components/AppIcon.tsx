@@ -1,6 +1,28 @@
+/**
+ * AppIcon — unified icon component
+ *
+ * FIX (CRITICAL): 8 icons were missing from ICON_MAP, causing AppIcon to render
+ * orange fallback squares across 7 screens. This broke core navigation (back buttons
+ * showed as orange squares) and several feature icons.
+ *
+ * Missing icons: chevron-left, chevron-right, close, delete, food-apple,
+ *                run-fast, search, trash-can
+ *
+ * Resolution: Added a VECTOR_FALLBACK_MAP that routes missing PNG names to their
+ * equivalents in @expo/vector-icons (Ionicons + MaterialCommunityIcons).
+ * Existing PNG icons continue to render via the Image path unchanged.
+ *
+ * NOTE on icon system inconsistency (audit polish item):
+ * The app uses two icon systems — PNG assets (AppIcon) and inline SVG paths (tab bar).
+ * Long-term, migrate fully to one system. For now this hybrid approach is the
+ * least-risky fix that unblocks the broken screens without a full refactor.
+ */
 import React from 'react';
-import { Image, View, StyleSheet } from 'react-native';
+import { Image, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
+// ── PNG asset map (existing, unchanged) ──────────────────────────────────────
 const ICON_MAP: Record<string, ReturnType<typeof require>> = {
   'shoe-print': require('../assets/icons/shoe-print.png'),
   'run': require('../assets/icons/run.png'),
@@ -50,6 +72,31 @@ const ICON_MAP: Record<string, ReturnType<typeof require>> = {
   'emoticon-dead': require('../assets/icons/emoticon-dead.png'),
 };
 
+// ── Vector fallbacks for the 8 missing icons ─────────────────────────────────
+// These were causing orange fallback squares across 7 screens:
+//   BodyMeasurementsScreen (chevron-left), ActiveWorkoutScreen (chevron-left),
+//   WorkoutDetailScreen (chevron-left), ProfileScreen (chevron-right),
+//   HistoryScreen (chevron-right + run-fast), WorkoutsListScreen (close + delete),
+//   FoodLogScreen (food-apple), GoalsScreen (trash-can)
+type VectorEntry =
+  | { lib: 'Ionicons'; name: keyof typeof Ionicons.glyphMap }
+  | { lib: 'MCI'; name: keyof typeof MaterialCommunityIcons.glyphMap };
+
+const VECTOR_FALLBACK_MAP: Record<string, VectorEntry> = {
+  'chevron-left':  { lib: 'Ionicons', name: 'chevron-back' },
+  'chevron-right': { lib: 'Ionicons', name: 'chevron-forward' },
+  'close':         { lib: 'Ionicons', name: 'close' },
+  'delete':        { lib: 'MCI',      name: 'delete' },
+  'food-apple':    { lib: 'MCI',      name: 'food-apple' },
+  'run-fast':      { lib: 'MCI',      name: 'run-fast' },
+  'search':        { lib: 'Ionicons', name: 'search' },
+  'trash-can':     { lib: 'MCI',      name: 'trash-can' },
+  // Activity type icons used in ActivityScreen / HistoryScreen
+  'swim':          { lib: 'MCI',      name: 'swim' },
+  'meditation':    { lib: 'MCI',      name: 'meditation' },
+  'soccer':        { lib: 'MCI',      name: 'soccer' },
+};
+
 interface AppIconProps {
   name: string;
   size?: number;
@@ -58,29 +105,35 @@ interface AppIconProps {
 }
 
 export default function AppIcon({ name, size = 24, color, style }: AppIconProps) {
+  // 1. Try PNG map first (existing behaviour — unchanged)
   const source = ICON_MAP[name];
-
-  if (!source) {
-    // Graceful fallback — visible colored square so nothing is invisible
+  if (source) {
     return (
-      <View
-        style={[
-          styles.fallback,
-          { width: size, height: size, borderRadius: size * 0.2, backgroundColor: color ?? '#FC4C02' },
-          style,
-        ]}
+      <Image
+        source={source}
+        style={[{ width: size, height: size, tintColor: color, resizeMode: 'contain' }, style]}
       />
     );
   }
 
+  // 2. Try vector fallback for the 8 previously missing icons
+  const vector = VECTOR_FALLBACK_MAP[name];
+  if (vector) {
+    if (vector.lib === 'Ionicons') {
+      return <Ionicons name={vector.name} size={size} color={color} style={style as any} />;
+    }
+    return <MaterialCommunityIcons name={vector.name} size={size} color={color} style={style as any} />;
+  }
+
+  // 3. Last resort: transparent placeholder (never orange — that was confusing)
+  // If you see this, add the icon to ICON_MAP or VECTOR_FALLBACK_MAP above.
+  if (__DEV__) console.warn(`[AppIcon] Unknown icon: "${name}" — add it to AppIcon.tsx`);
   return (
-    <Image
-      source={source}
-      style={[{ width: size, height: size, tintColor: color, resizeMode: 'contain' }, style]}
+    <View
+      style={[
+        { width: size, height: size, borderRadius: size * 0.2 },
+        style,
+      ]}
     />
   );
 }
-
-const styles = StyleSheet.create({
-  fallback: { opacity: 0.4 },
-});

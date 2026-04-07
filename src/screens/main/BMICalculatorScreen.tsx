@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import AppIcon from '../../components/AppIcon';
@@ -48,23 +49,24 @@ export default function BMICalculatorScreen() {
 
   const getBMIColor = () => {
     if (!bmi) return colors.textSecondary;
-    if (bmi < 18.5) return '#2196F3';
-    if (bmi < 25) return '#4CAF50';
-    if (bmi < 30) return '#FFC107';
-    return '#F44336';
+    if (bmi < 18.5) return colors.info;
+    if (bmi < 25) return colors.success;
+    if (bmi < 30) return colors.warning;
+    return colors.errorSoft;
   };
 
   const bmiColor = getBMIColor();
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.scroll}>
       {/* Input card */}
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.cardTitle, { color: colors.text }]}>BMI Calculator</Text>
 
         {[
-          { icon: 'human-male-height', value: height, setter: setHeight, placeholder: 'Height (cm)', color: '#2196F3' },
-          { icon: 'weight', value: weight, setter: setWeight, placeholder: 'Weight (kg)', color: '#FF9800' },
+          { icon: 'human-male-height', value: height, setter: setHeight, placeholder: 'Height (cm)', color: colors.metricDistance },
+          { icon: 'weight', value: weight, setter: setWeight, placeholder: 'Weight (kg)', color: colors.warning },
         ].map((field) => (
           <View key={field.placeholder} style={styles.inputRow}>
             <View style={[styles.inputIcon, { backgroundColor: field.color + '20' }]}>
@@ -82,7 +84,7 @@ export default function BMICalculatorScreen() {
         ))}
 
         <TouchableOpacity style={[styles.calcBtn, { backgroundColor: colors.primary }]} onPress={calculateBMI}>
-          <Text style={styles.calcBtnText}>Calculate BMI</Text>
+          <Text style={[styles.calcBtnText, { color: colors.onPrimary }]}>Calculate BMI</Text>
         </TouchableOpacity>
       </View>
 
@@ -102,7 +104,7 @@ export default function BMICalculatorScreen() {
           {/* BMI scale */}
           <View style={styles.scaleWrap}>
             <View style={styles.scaleBar}>
-              {['#2196F3', '#4CAF50', '#FFC107', '#F44336'].map((c) => (
+              {[colors.info, colors.success, colors.warning, colors.errorSoft].map((c) => (
                 <View key={c} style={[styles.scaleSegment, { backgroundColor: c }]} />
               ))}
             </View>
@@ -123,10 +125,10 @@ export default function BMICalculatorScreen() {
         </Text>
         <Text style={[styles.infoTitle, { color: colors.text, marginTop: 16 }]}>BMI Categories</Text>
         {[
-          { color: '#2196F3', label: 'Underweight: BMI < 18.5' },
-          { color: '#4CAF50', label: 'Normal: BMI 18.5 – 24.9' },
-          { color: '#FFC107', label: 'Overweight: BMI 25 – 29.9' },
-          { color: '#F44336', label: 'Obese: BMI ≥ 30' },
+          { color: colors.info, label: 'Underweight: BMI < 18.5' },
+          { color: colors.success, label: 'Normal: BMI 18.5 – 24.9' },
+          { color: colors.warning, label: 'Overweight: BMI 25 – 29.9' },
+          { color: colors.errorSoft, label: 'Obese: BMI ≥ 30' },
         ].map((item) => (
           <View key={item.label} style={styles.categoryRow}>
             <View style={[styles.categoryDot, { backgroundColor: item.color }]} />
@@ -135,6 +137,7 @@ export default function BMICalculatorScreen() {
         ))}
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -147,7 +150,7 @@ const styles = StyleSheet.create({
   inputIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   input: { flex: 1, borderWidth: 1.5, borderRadius: borderRadius.md, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
   calcBtn: { height: 56, borderRadius: borderRadius.full, alignItems: 'center', justifyContent: 'center' },
-  calcBtnText: { color: '#000000', fontSize: 16, fontWeight: '800' },
+  calcBtnText: { fontSize: 16, fontWeight: '800' },
   bmiCircle: { width: 150, height: 150, borderRadius: 75, borderWidth: 4, justifyContent: 'center', alignItems: 'center' },
   bmiValue: { fontSize: 48, fontWeight: '900' },
   bmiCategory: { fontSize: 14, fontWeight: '600', marginTop: 4 },

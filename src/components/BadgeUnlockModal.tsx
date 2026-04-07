@@ -9,6 +9,7 @@ import {
   Modal, View, Text, StyleSheet, TouchableOpacity, Animated, Vibration,
 } from 'react-native';
 import { BadgeDefinition } from '../constants/badges';
+import { useTheme } from '../context/ThemeContext';
 
 interface Props {
   badge: BadgeDefinition | null;
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export default function BadgeUnlockModal({ badge, onDismiss }: Props) {
+  const { colors } = useTheme();
   const scaleAnim   = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim   = useRef(new Animated.Value(1)).current;
@@ -69,12 +71,15 @@ export default function BadgeUnlockModal({ badge, onDismiss }: Props) {
 
   return (
     <Modal transparent animationType="none" visible={!!badge} onRequestClose={handleDismiss}>
-      <Animated.View style={[styles.overlay, { opacity: opacityAnim }]}>
-        <Animated.View style={[styles.card, { transform: [{ scale: scaleAnim }] }]}>
+      <Animated.View style={[styles.overlay, { opacity: opacityAnim, backgroundColor: colors.overlay }]}>
+        <Animated.View style={[
+          styles.card,
+          { transform: [{ scale: scaleAnim }], backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+        ]}>
           {/* Glow background */}
           <Animated.View style={[styles.glow, { backgroundColor: glowColor }]} />
 
-          <Text style={styles.newBadgeLabel}>🏆 NEW BADGE UNLOCKED</Text>
+          <Text style={[styles.newBadgeLabel, { color: colors.textSecondary }]}>🏆 NEW BADGE UNLOCKED</Text>
 
           {/* Badge icon with pulse */}
           <Animated.View style={[styles.iconWrap, {
@@ -86,7 +91,7 @@ export default function BadgeUnlockModal({ badge, onDismiss }: Props) {
           </Animated.View>
 
           <Text style={[styles.badgeName, { color: badge.color }]}>{badge.label}</Text>
-          <Text style={styles.badgeDesc}>{badge.description}</Text>
+          <Text style={[styles.badgeDesc, { color: colors.textSecondary }]}>{badge.description}</Text>
 
           {/* Category chip */}
           <View style={[styles.categoryChip, { backgroundColor: badge.color + '15', borderColor: badge.color + '40' }]}>
@@ -107,13 +112,11 @@ export default function BadgeUnlockModal({ badge, onDismiss }: Props) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
   },
   card: {
-    backgroundColor: '#141828',
     borderRadius: 28,
     padding: 32,
     alignItems: 'center',
@@ -121,7 +124,6 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 340,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
   },
   glow: {
@@ -132,7 +134,6 @@ const styles = StyleSheet.create({
   newBadgeLabel: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#7A83A6',
     letterSpacing: 2,
     textTransform: 'uppercase',
   },
@@ -154,7 +155,6 @@ const styles = StyleSheet.create({
   },
   badgeDesc: {
     fontSize: 14,
-    color: '#7A83A6',
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -171,5 +171,5 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 999,
   },
-  dismissText: { color: '#000', fontWeight: '900', fontSize: 15 },
+  dismissText: { color: '#FFFFFF', fontWeight: '900', fontSize: 15 },
 });

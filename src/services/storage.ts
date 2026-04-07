@@ -120,6 +120,41 @@ export class StorageService {
       return { urls: [], error };
     }
   }
+
+  // FIX: Avatar upload — was completely missing.
+  // ProfileScreen.pickImage() only set local state and never persisted the photo.
+  // Silent data loss: user saw their face, restarted app, photo gone.
+  async uploadAvatar(userId: string, photoUri: string): Promise<{ url: string | null; error: any }> {
+    try {
+      const ext = (photoUri.split('.').pop() ?? 'jpg').toLowerCase().replace(/\?.*$/, '');
+      const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? ext : 'jpg';
+      const fileName = `avatars/${userId}/avatar.${safeExt}`;
+
+      let fileData: string | Blob;
+      if (Platform.OS === 'web') {
+        const response = await fetch(photoUri);
+        fileData = await response.blob();
+      } else {
+        fileData = await FileSystem.readAsStringAsync(photoUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
+
+      const { error } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, fileData, {
+          contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
+          upsert: true, // overwrite existing avatar
+        });
+
+      if (error) throw error;
+
+      const { data: publicUrl } = supabase.storage.from('avatars').getPublicUrl(fileName);
+      return { url: publicUrl.publicUrl, error: null };
+    } catch (error) {
+      return { url: null, error };
+    }
+  }
 }
 
 export const storageService = new StorageService();

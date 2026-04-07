@@ -1,6 +1,8 @@
-import moment from 'moment';
+import dayjs from '../utils/dayjs';
 import { supabase } from './supabase';
 import { Activity, DailyLog, Goal, Reminder, Workout } from '../types';
+import { withCache, invalidateCache, invalidateCachePrefix, TTL } from './offlineCache';
+import { socialService } from './socialService';
 
 function mapActivity(item: Record<string, any>): Activity {
   return {
@@ -130,22 +132,22 @@ export class DatabaseService {
     _userId: string,
     limit = 10
   ): Promise<{ data: Activity[]; error: any }> {
-    try {
-      const authUser = await getAuthUser();
-      if (!authUser) return { data: [], error: 'Not authenticated' };
-
-      const { data, error } = await supabase
-        .from('activities')
-        .select('*')
-        .eq('user_id', authUser.id)
-        .order('start_time', { ascending: false })
-        .limit(limit);
-
-      if (error) throw error;
-      return { data: (data ?? []).map(mapActivity), error: null };
-    } catch (error) {
-      return { data: [], error };
-    }
+    const authUser = await getAuthUser();
+    if (!authUser) return { data: [], error: 'Not authenticated' };
+    const result = await withCache<Activity[]>(
+      `recent_activities/${authUser.id}/${limit}`,
+      TTL.ACTIVITIES,
+      async () => {
+        const { data, error } = await supabase
+          .from('activities').select('*')
+          .eq('user_id', authUser.id)
+          .order('start_time', { ascending: false }).limit(limit);
+        if (error) return { data: [], error };
+        return { data: (data ?? []).map(mapActivity), error: null };
+      },
+      []
+    );
+    return { data: result.data, error: result.error ?? null };
   }
 
   async updateActivityPhotos(
@@ -314,50 +316,47 @@ export class DatabaseService {
     _userId: string,
     date: Date
   ): Promise<{ data: DailyLog | null; error: any }> {
-    try {
-      const authUser = await getAuthUser();
-      if (!authUser) return { data: null, error: 'Not authenticated' };
-
-      const dateStr = moment(date).format('YYYY-MM-DD');
-      const { data, error } = await supabase
-        .from('daily_logs')
-        .select('*')
-        .eq('user_id', authUser.id)
-        .eq('date', dateStr)
-        .single();
-
-      if (error && error.code !== 'PGRST116') throw error;
-
-      return { data: data ? mapDailyLog(data) : null, error: null };
-    } catch (error) {
-      return { data: null, error };
-    }
+    const authUser = await getAuthUser();
+    if (!authUser) return { data: null, error: 'Not authenticated' };
+    const dateStr = dayjs(date).format('YYYY-MM-DD');
+    const result = await withCache<DailyLog | null>(
+      `daily_log/${authUser.id}/${dateStr}`,
+      TTL.DAILY_LOG,
+      async () => {
+        const { data, error } = await supabase
+          .from('daily_logs').select('*')
+          .eq('user_id', authUser.id).eq('date', dateStr).single();
+        if (error && error.code !== 'PGRST116') return { data: null, error };
+        return { data: data ? mapDailyLog(data) : null, error: null };
+      },
+      null
+    );
+    return { data: result.data, error: result.error ?? null };
   }
 
   async getWeeklyLogs(
     _userId: string,
     startDate: Date
   ): Promise<{ data: DailyLog[]; error: any }> {
-    try {
-      const authUser = await getAuthUser();
-      if (!authUser) return { data: [], error: 'Not authenticated' };
-
-      const startStr = moment(startDate).format('YYYY-MM-DD');
-      const endStr = moment(startDate).add(7, 'days').format('YYYY-MM-DD');
-
-      const { data, error } = await supabase
-        .from('daily_logs')
-        .select('*')
-        .eq('user_id', authUser.id)
-        .gte('date', startStr)
-        .lte('date', endStr)
-        .order('date', { ascending: true });
-
-      if (error) throw error;
-      return { data: (data ?? []).map(mapDailyLog), error: null };
-    } catch (error) {
-      return { data: [], error };
-    }
+    const authUser = await getAuthUser();
+    if (!authUser) return { data: [], error: 'Not authenticated' };
+    const startStr = dayjs(startDate).format('YYYY-MM-DD');
+    const endStr = dayjs(startDate).add(7, 'days').format('YYYY-MM-DD');
+    const result = await withCache<DailyLog[]>(
+      `weekly_logs/${authUser.id}/${startStr}`,
+      TTL.WEEKLY_LOGS,
+      async () => {
+        const { data, error } = await supabase
+          .from('daily_logs').select('*')
+          .eq('user_id', authUser.id)
+          .gte('date', startStr).lte('date', endStr)
+          .order('date', { ascending: true });
+        if (error) return { data: [], error };
+        return { data: (data ?? []).map(mapDailyLog), error: null };
+      },
+      []
+    );
+    return { data: result.data, error: result.error ?? null };
   }
 
   // ─── Reminders ────────────────────────────────────────────────────────────
@@ -604,7 +603,7 @@ export class DatabaseService {
     bestDay: { date: string; steps: number };
   }> {
     try {
-      const startDate = moment().startOf(period).toDate();
+      const startDate = dayjs().startOf(period).toDate();
       const { data: activities } = await this.getActivities(userId, startDate);
 
       const totalSteps = activities.reduce((sum, a) => sum + a.steps, 0);
@@ -614,7 +613,7 @@ export class DatabaseService {
 
       const dailySteps: Record<string, number> = {};
       activities.forEach((activity) => {
-        const date = moment(activity.startTime).format('YYYY-MM-DD');
+        const date = dayjs(activity.startTime).format('YYYY-MM-DD');
         dailySteps[date] = (dailySteps[date] ?? 0) + activity.steps;
       });
 
@@ -707,7 +706,7 @@ export class DatabaseService {
           .gte('start_time', weekStartStr),
         supabase
           .from('goals')
-          .select('id, type, target')
+          .select('id, type, target, completed')
           .eq('user_id', authUser.id),
       ]);
 
@@ -731,10 +730,19 @@ export class DatabaseService {
         const current = updates[goal.type as string];
         if (current !== undefined) {
           const completed = current >= goal.target;
+          const wasCompleted = goal.completed;
           await supabase
             .from('goals')
             .update({ current, completed })
             .eq('id', goal.id);
+          // Fire feed event the first time a goal is completed
+          if (completed && !wasCompleted) {
+            socialService.publishFeedEvent('goal_achieved', {
+              goalType: goal.type,
+              target: goal.target,
+              unit: goal.unit,
+            });
+          }
         }
       }
     } catch {

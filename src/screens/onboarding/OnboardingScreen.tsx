@@ -8,8 +8,9 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, Platform, Alert, KeyboardAvoidingView, Animated,
+  ScrollView, Platform, Alert, KeyboardAvoidingView,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -42,6 +43,7 @@ const STEPS = [
 ];
 
 export default function OnboardingScreen({ navigation }: any) {
+  const insets = useSafeAreaInsets();
   const { user, updateProfile } = useAuth();
   const { colors } = useTheme();
   const accent = colors.primary;
@@ -68,8 +70,9 @@ export default function OnboardingScreen({ navigation }: any) {
     try {
       const h = parseFloat(height);
       const w = parseFloat(weight);
-      if (isNaN(h) || isNaN(w) || h < 50 || h > 300 || w < 20 || w > 500) {
-        Alert.alert('Invalid values', 'Please enter realistic height (cm) and weight (kg).');
+      // FIX: explicitly reject 0 — parseFloat('0') passes isNaN check but is invalid
+      if (isNaN(h) || isNaN(w) || h <= 0 || w <= 0 || h < 50 || h > 300 || w < 20 || w > 500) {
+        Alert.alert('Invalid values', 'Please enter realistic height (cm) and weight (kg). Values cannot be zero.');
         setSaving(false);
         return;
       }
@@ -78,6 +81,14 @@ export default function OnboardingScreen({ navigation }: any) {
       await AsyncStorage.setItem('user_fitness_goal', selectedGoal ?? '');
       await AsyncStorage.setItem('user_fitness_level', selectedLevel ?? '');
       await AsyncStorage.setItem('user_training_days', String(trainingDays));
+      // FIX: also save under ONBOARDING key so HomeScreen APS can read trainingDays
+      await AsyncStorage.setItem('@epexfit_onboarding', JSON.stringify({
+        goal: selectedGoal,
+        level: selectedLevel,
+        trainingDays,
+        height: h,
+        weight: w,
+      }));
 
       // Pre-create default goals based on selection
       const stepGoal = selectedLevel === 'beginner' ? 7000 : selectedLevel === 'intermediate' ? 10000 : 12000;
@@ -105,164 +116,166 @@ export default function OnboardingScreen({ navigation }: any) {
   const current = STEPS[step];
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={[styles.container, { paddingTop: Platform.OS === 'ios' ? 72 : 48 }]}
-        keyboardShouldPersistTaps="handled"
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Progress dots */}
-        <View style={styles.dots}>
-          {STEPS.map((_, i) => (
-            <View key={i} style={[styles.dot, {
-              backgroundColor: i <= step ? accent : colors.border,
-              width: i === step ? 28 : 7,
-            }]} />
-          ))}
-        </View>
-
-        {/* Step indicator */}
-        <Text style={[styles.stepNum, { color: colors.textDisabled }]}>
-          Step {step + 1} of {STEPS.length}
-        </Text>
-
-        <Text style={styles.emoji}>{current.emoji}</Text>
-        <Text style={[styles.title, { color: colors.text }]}>{current.title}</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{current.subtitle}</Text>
-
-        {/* Step 0 — Goal selection */}
-        {step === 0 && (
-          <View style={styles.goalsGrid}>
-            {GOALS.map((g) => {
-              const selected = selectedGoal === g.key;
-              return (
-                <TouchableOpacity
-                  key={g.key}
-                  onPress={() => setSelectedGoal(g.key)}
-                  activeOpacity={0.8}
-                  style={[styles.goalCard, {
-                    backgroundColor: selected ? accent + '18' : colors.surfaceElevated,
-                    borderColor: selected ? accent : colors.border,
-                    borderWidth: selected ? 2 : 1,
-                  }]}
-                >
-                  <Text style={styles.goalIcon}>{g.icon}</Text>
-                  <Text style={[styles.goalLabel, { color: selected ? accent : colors.text }]}>{g.label}</Text>
-                  <Text style={[styles.goalDesc, { color: colors.textSecondary }]}>{g.desc}</Text>
-                </TouchableOpacity>
-              );
-            })}
+        <ScrollView
+          contentContainerStyle={[styles.container, { paddingTop: insets.top + 16 }]}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Progress dots */}
+          <View style={styles.dots}>
+            {STEPS.map((_, i) => (
+              <View key={i} style={[styles.dot, {
+                backgroundColor: i <= step ? accent : colors.border,
+                width: i === step ? 28 : 7,
+              }]} />
+            ))}
           </View>
-        )}
 
-        {/* Step 1 — Fitness level */}
-        {step === 1 && (
-          <View style={styles.levelList}>
-            {LEVELS.map((l) => {
-              const selected = selectedLevel === l.key;
-              return (
-                <TouchableOpacity
-                  key={l.key}
-                  onPress={() => setSelectedLevel(l.key)}
-                  style={[styles.levelCard, {
-                    backgroundColor: selected ? accent + '15' : colors.surfaceElevated,
-                    borderColor: selected ? accent : colors.border,
-                    borderWidth: selected ? 2 : 1,
-                  }]}
-                >
-                  <Text style={{ fontSize: 32 }}>{l.icon}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.levelLabel, { color: selected ? accent : colors.text }]}>{l.label}</Text>
-                    <Text style={[styles.levelDesc, { color: colors.textSecondary }]}>{l.desc}</Text>
-                  </View>
-                  {selected && <Text style={{ fontSize: 20, color: accent }}>✓</Text>}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
+          {/* Step indicator */}
+          <Text style={[styles.stepNum, { color: colors.textDisabled }]}>
+            Step {step + 1} of {STEPS.length}
+          </Text>
 
-        {/* Step 2 — Training days */}
-        {step === 2 && (
-          <View style={styles.daysWrap}>
-            <Text style={[styles.daysNum, { color: accent }]}>{trainingDays}</Text>
-            <Text style={[styles.daysLbl, { color: colors.textSecondary }]}>days per week</Text>
-            <View style={styles.daysRow}>
-              {DAYS_OPTIONS.map((d) => (
-                <TouchableOpacity
-                  key={d}
-                  onPress={() => setTrainingDays(d)}
-                  style={[styles.dayChip, {
-                    backgroundColor: trainingDays === d ? accent : colors.surfaceElevated,
-                    borderColor: trainingDays === d ? accent : colors.border,
-                  }]}
-                >
-                  <Text style={{ color: trainingDays === d ? '#000' : colors.text, fontWeight: '800', fontSize: 18 }}>{d}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <Text style={[styles.dayHint, { color: colors.textSecondary }]}>
-              {trainingDays <= 2 ? 'Light schedule — perfect for beginners' :
-               trainingDays <= 4 ? 'Balanced training — great for most people' :
-               'Intense schedule — make sure to rest adequately'}
-            </Text>
-          </View>
-        )}
+          <Text style={styles.emoji}>{current.emoji}</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{current.title}</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{current.subtitle}</Text>
 
-        {/* Step 3 — Body metrics */}
-        {step === 3 && (
-          <View style={styles.inputsWrap}>
-            <View style={styles.inputGroup}>
-              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Height (cm)</Text>
-              <TextInput
-                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceElevated }]}
-                value={height} onChangeText={setHeight}
-                keyboardType="decimal-pad" placeholder="e.g. 175"
-                placeholderTextColor={colors.textDisabled}
-              />
+          {/* Step 0 — Goal selection */}
+          {step === 0 && (
+            <View style={styles.goalsGrid}>
+              {GOALS.map((g) => {
+                const selected = selectedGoal === g.key;
+                return (
+                  <TouchableOpacity
+                    key={g.key}
+                    onPress={() => setSelectedGoal(g.key)}
+                    activeOpacity={0.8}
+                    style={[styles.goalCard, {
+                      backgroundColor: selected ? accent + '18' : colors.surfaceElevated,
+                      borderColor: selected ? accent : colors.border,
+                      borderWidth: selected ? 2 : 1,
+                    }]}
+                  >
+                    <Text style={styles.goalIcon}>{g.icon}</Text>
+                    <Text style={[styles.goalLabel, { color: selected ? accent : colors.text }]}>{g.label}</Text>
+                    <Text style={[styles.goalDesc, { color: colors.textSecondary }]}>{g.desc}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-            <View style={styles.inputGroup}>
-              <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Weight (kg)</Text>
-              <TextInput
-                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceElevated }]}
-                value={weight} onChangeText={setWeight}
-                keyboardType="decimal-pad" placeholder="e.g. 72"
-                placeholderTextColor={colors.textDisabled}
-              />
+          )}
+
+          {/* Step 1 — Fitness level */}
+          {step === 1 && (
+            <View style={styles.levelList}>
+              {LEVELS.map((l) => {
+                const selected = selectedLevel === l.key;
+                return (
+                  <TouchableOpacity
+                    key={l.key}
+                    onPress={() => setSelectedLevel(l.key)}
+                    style={[styles.levelCard, {
+                      backgroundColor: selected ? accent + '15' : colors.surfaceElevated,
+                      borderColor: selected ? accent : colors.border,
+                      borderWidth: selected ? 2 : 1,
+                    }]}
+                  >
+                    <Text style={{ fontSize: 32 }}>{l.icon}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.levelLabel, { color: selected ? accent : colors.text }]}>{l.label}</Text>
+                      <Text style={[styles.levelDesc, { color: colors.textSecondary }]}>{l.desc}</Text>
+                    </View>
+                    {selected && <Text style={{ fontSize: 20, color: accent }}>✓</Text>}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-            <View style={[styles.privacyNote, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-              <Text style={{ fontSize: 14 }}>🔒</Text>
-              <Text style={[styles.privacyText, { color: colors.textSecondary }]}>
-                Used only for BMI and calorie calculations. Never shared.
+          )}
+
+          {/* Step 2 — Training days */}
+          {step === 2 && (
+            <View style={styles.daysWrap}>
+              <Text style={[styles.daysNum, { color: accent }]}>{trainingDays}</Text>
+              <Text style={[styles.daysLbl, { color: colors.textSecondary }]}>days per week</Text>
+              <View style={styles.daysRow}>
+                {DAYS_OPTIONS.map((d) => (
+                  <TouchableOpacity
+                    key={d}
+                    onPress={() => setTrainingDays(d)}
+                    style={[styles.dayChip, {
+                      backgroundColor: trainingDays === d ? accent : colors.surfaceElevated,
+                      borderColor: trainingDays === d ? accent : colors.border,
+                    }]}
+                  >
+                    <Text style={{ color: trainingDays === d ? colors.onPrimary : colors.text, fontWeight: '800', fontSize: 18 }}>{d}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={[styles.dayHint, { color: colors.textSecondary }]}>
+                {trainingDays <= 2 ? 'Light schedule — perfect for beginners' :
+                 trainingDays <= 4 ? 'Balanced training — great for most people' :
+                 'Intense schedule — make sure to rest adequately'}
               </Text>
             </View>
-          </View>
-        )}
+          )}
 
-        {/* CTA */}
-        <TouchableOpacity
-          onPress={() => {
-            if (step < STEPS.length - 1) setStep(step + 1);
-            else handleFinish();
-          }}
-          disabled={!canProceed() || saving}
-          activeOpacity={0.85}
-          style={[styles.btn, { backgroundColor: canProceed() ? accent : colors.border }]}
-        >
-          <Text style={[styles.btnText, { color: canProceed() ? '#000' : colors.textDisabled }]}>
-            {saving ? 'Setting up…' : step < STEPS.length - 1 ? 'Continue →' : "Let's go 🚀"}
-          </Text>
-        </TouchableOpacity>
+          {/* Step 3 — Body metrics */}
+          {step === 3 && (
+            <View style={styles.inputsWrap}>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Height (cm)</Text>
+                <TextInput
+                  style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceElevated }]}
+                  value={height} onChangeText={setHeight}
+                  keyboardType="decimal-pad" placeholder="e.g. 175"
+                  placeholderTextColor={colors.textDisabled}
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Weight (kg)</Text>
+                <TextInput
+                  style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceElevated }]}
+                  value={weight} onChangeText={setWeight}
+                  keyboardType="decimal-pad" placeholder="e.g. 72"
+                  placeholderTextColor={colors.textDisabled}
+                />
+              </View>
+              <View style={[styles.privacyNote, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                <Text style={{ fontSize: 14, color: colors.text }}>🔒</Text>
+                <Text style={[styles.privacyText, { color: colors.textSecondary }]}>
+                  Used only for BMI and calorie calculations. Never shared.
+                </Text>
+              </View>
+            </View>
+          )}
 
-        {step > 0 && (
-          <TouchableOpacity onPress={() => setStep(step - 1)} style={styles.backBtn}>
-            <Text style={[styles.backText, { color: colors.textSecondary }]}>← Back</Text>
+          {/* CTA */}
+          <TouchableOpacity
+            onPress={() => {
+              if (step < STEPS.length - 1) setStep(step + 1);
+              else if (!saving) handleFinish();
+            }}
+            disabled={!canProceed() || saving}
+            activeOpacity={0.85}
+            style={[styles.btn, { backgroundColor: canProceed() ? accent : colors.border }]}
+          >
+            <Text style={[styles.btnText, { color: canProceed() ? colors.onPrimary : colors.textDisabled }]}>
+              {saving ? 'Setting up…' : step < STEPS.length - 1 ? 'Continue →' : "Let's go 🚀"}
+            </Text>
           </TouchableOpacity>
-        )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+
+          {step > 0 && (
+            <TouchableOpacity onPress={() => setStep(step - 1)} style={styles.backBtn}>
+              <Text style={[styles.backText, { color: colors.textSecondary }]}>← Back</Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 

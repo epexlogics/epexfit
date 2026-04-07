@@ -2,7 +2,7 @@
   "expo": {
     "name": "EpexFit",
     "slug": "epexfit",
-    "version": "1.0.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./src/assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -18,10 +18,16 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.epexlogics.epexfit",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "EpexFit needs access to location to track your running and walking routes.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "EpexFit needs access to location to track your running and walking routes.",
-        "NSCameraUsageDescription": "EpexFit needs access to camera to take photos after activities.",
-        "NSPhotoLibraryUsageDescription": "EpexFit needs access to photo library to save activity photos."
+        "NSLocationWhenInUseUsageDescription": "EpexFit uses your location to track routes during activities.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "EpexFit tracks your route in the background during active workouts.",
+        "NSHealthShareUsageDescription": "EpexFit reads steps, sleep and heart rate from Apple Health.",
+        "NSHealthUpdateUsageDescription": "EpexFit writes workout data to Apple Health.",
+        "NSCameraUsageDescription": "EpexFit uses the camera for workout photo logs.",
+        "NSPhotoLibraryUsageDescription": "EpexFit accesses photos for workout logs.",
+        "NSMotionUsageDescription": "EpexFit uses motion sensors to count your steps automatically."
+      },
+      "entitlements": {
+        "com.apple.developer.healthkit": true
       }
     },
     "android": {
@@ -40,7 +46,8 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACTIVITY_RECOGNITION"
       ]
     },
     "web": {
@@ -56,7 +63,9 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow EpexFit to take photos after your activities."
+          "cameraPermission": "Allow EpexFit to take photos and scan food barcodes.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ],
       [
@@ -66,7 +75,7 @@
           "color": "#FC4C02"
         }
       ],
-       [
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow EpexFit to access your photos to set profile picture."
@@ -74,11 +83,13 @@
       ],
       "expo-asset"
     ],
-    "owner": "epexlogic",
+    "owner": "epexlogicsllc",
     "extra": {
       "eas": {
-        "projectId": "fa091abc-6a83-4a10-9065-7a660ed3b516"
-      }
+        "projectId": "e8ddc421-97df-4159-a41c-989fe527619d"
+      },
+      "supabaseUrl": "https://yvmlnwoppiosbphfcmhe.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2bWxud29wcGlvc2JwaGZjbWhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3ODYzODYsImV4cCI6MjA5MDM2MjM4Nn0.NQmF7hsqbWUxD8-GDXQmWiAMBIweGv2EaHn672cnivQ"
     },
     "scheme": "epexfit"
   }

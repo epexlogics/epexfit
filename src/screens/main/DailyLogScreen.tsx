@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, ActivityIndicator, RefreshControl, Animated,
+  TextInput, ActivityIndicator, RefreshControl, Animated
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -10,14 +11,14 @@ import { databaseService } from '../../services/database';
 import { DailyLog } from '../../types';
 import AppIcon from '../../components/AppIcon';
 import { borderRadius, spacing } from '../../constants/theme';
-import moment from 'moment';
+import dayjs from '../../utils/dayjs';
 
 const MOOD_OPTIONS: { value: 1 | 2 | 3 | 4 | 5; icon: string; label: string; color: string }[] = [
-  { value: 1, icon: 'emoticon-dead',     label: 'Terrible', color: '#F44336' },
-  { value: 2, icon: 'emoticon-sad',      label: 'Bad',      color: '#FF5722' },
-  { value: 3, icon: 'emoticon-neutral',  label: 'Okay',     color: '#FFC107' },
-  { value: 4, icon: 'emoticon-happy',    label: 'Good',     color: '#8BC34A' },
-  { value: 5, icon: 'emoticon-excited',  label: 'Great',    color: '#4CAF50' },
+  { value: 1, icon: 'emoticon-dead',     label: 'Terrible', color: '#FB7185' },
+  { value: 2, icon: 'emoticon-sad',      label: 'Bad',      color: '#FB923C' },
+  { value: 3, icon: 'emoticon-neutral',  label: 'Okay',     color: '#FBBF24' },
+  { value: 4, icon: 'emoticon-happy',    label: 'Good',     color: '#4ADE80' },
+  { value: 5, icon: 'emoticon-excited',  label: 'Great',    color: '#22D3EE' },
 ];
 
 interface LogForm {
@@ -25,6 +26,7 @@ interface LogForm {
   protein: string;
   fiber: string;
   sleep: string;
+  steps: string;
   mood: 1 | 2 | 3 | 4 | 5;
   notes: string;
 }
@@ -61,7 +63,7 @@ export default function DailyLogScreen() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const [form, setForm] = useState<LogForm>({
-    water: '', protein: '', fiber: '', sleep: '', mood: 3, notes: '',
+    water: '', protein: '', fiber: '', sleep: '', steps: '', mood: 3, notes: '',
   });
 
   // Ref to hold latest form for blur-save
@@ -83,6 +85,7 @@ export default function DailyLogScreen() {
         protein: data.protein ? String(data.protein) : '',
         fiber: data.fiber ? String(data.fiber) : '',
         sleep: data.sleep ? String(data.sleep) : '',
+        steps: data.steps ? String(data.steps) : '',
         mood: data.mood || 3,
         notes: data.notes || '',
       });
@@ -101,7 +104,7 @@ export default function DailyLogScreen() {
     try {
       await databaseService.saveDailyLog({
         userId: user.id,
-        date: moment().format('YYYY-MM-DD'),
+        date: dayjs().format('YYYY-MM-DD'),
         steps: log?.steps ?? 0,
         distance: log?.distance ?? 0,
         calories: log?.calories ?? 0,
@@ -139,8 +142,21 @@ export default function DailyLogScreen() {
     }, [performSave])
   );
 
+  // FIX: sanitize numeric input — reject negative values and non-numeric chars
+  // TextInput had no min validation; users could type "-5" for water intake
+  const NUMERIC_FIELDS: Array<keyof LogForm> = ['water', 'protein', 'fiber', 'steps'];
   const updateField = (field: keyof LogForm, value: any) => {
-    const newForm = { ...formRef.current, [field]: value };
+    let sanitized = value;
+    if (NUMERIC_FIELDS.includes(field) && typeof value === 'string') {
+      // Strip non-numeric characters and prevent negatives
+      sanitized = value.replace(/[^0-9]/g, '');
+    }
+    if (field === 'sleep' && typeof value === 'string') {
+      // Allow decimal for sleep hours but prevent negatives
+      sanitized = value.replace(/[^0-9.]/g, '');
+      if (parseFloat(sanitized) < 0) sanitized = '0';
+    }
+    const newForm = { ...formRef.current, [field]: sanitized };
     setForm(newForm);
     scheduleAutoSave(newForm);
   };
@@ -159,6 +175,7 @@ export default function DailyLogScreen() {
   }
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.scroll}
@@ -167,21 +184,21 @@ export default function DailyLogScreen() {
       <View style={styles.pageHeader}>
         <View style={{ flex: 1 }}>
           <Text style={[styles.pageTitle, { color: colors.text }]}>Daily Log</Text>
-          <Text style={[styles.pageDate, { color: colors.textSecondary }]}>{moment().format('dddd, MMMM D')}</Text>
+          <Text style={[styles.pageDate, { color: colors.textSecondary }]}>{dayjs().format('dddd, MMMM D')}</Text>
         </View>
         {/* FIXED: Auto-save status indicator replaces manual Save button */}
         <View style={[styles.saveStatus, {
-          backgroundColor: saveStatus === 'saved' ? '#00C85320' : saveStatus === 'saving' ? colors.surfaceElevated : 'transparent',
-          borderColor: saveStatus === 'saved' ? '#00C85350' : 'transparent',
+          backgroundColor: saveStatus === 'saved' ? colors.success + '22' : saveStatus === 'saving' ? colors.surfaceElevated : 'transparent',
+          borderColor: saveStatus === 'saved' ? colors.success + '55' : 'transparent',
         }]}>
           {saveStatus === 'saving' && <ActivityIndicator size="small" color={colors.textSecondary} />}
-          {saveStatus === 'saved' && <Text style={styles.savedText}>✓ Saved</Text>}
+          {saveStatus === 'saved' && <Text style={[styles.savedText, { color: colors.success }]}>✓ Saved</Text>}
           {saveStatus === 'idle' && <Text style={[styles.autoSaveHint, { color: colors.textDisabled }]}>Auto-saves</Text>}
         </View>
       </View>
 
       {/* Water */}
-      <LogCard title="Water Intake" icon="water" iconColor="#00BCD4">
+      <LogCard title="Water Intake" icon="water" iconColor={colors.metricHydration}>
         <View style={styles.inputRow}>
           <TextInput
             style={[styles.numInput, { color: colors.text, borderColor: colors.border, flex: 1 }]}
@@ -190,8 +207,8 @@ export default function DailyLogScreen() {
           />
           <View style={styles.quickBtns}>
             {[200, 250, 500].map((a) => (
-              <TouchableOpacity key={a} style={[styles.quickBtn, { backgroundColor: '#00BCD420' }]} onPress={() => quickAdd('water', a)}>
-                <Text style={{ color: '#00BCD4', fontSize: 12, fontWeight: '600' }}>+{a}</Text>
+              <TouchableOpacity key={a} style={[styles.quickBtn, { backgroundColor: colors.metricHydration + '22' }]} onPress={() => quickAdd('water', a)}>
+                <Text style={{ color: colors.metricHydration, fontSize: 12, fontWeight: '600' }}>+{a}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -202,7 +219,7 @@ export default function DailyLogScreen() {
       </LogCard>
 
       {/* Protein */}
-      <LogCard title="Protein Intake" icon="food-steak" iconColor="#9C27B0">
+      <LogCard title="Protein Intake" icon="food-steak" iconColor={colors.metricProtein}>
         <View style={styles.inputRow}>
           <TextInput
             style={[styles.numInput, { color: colors.text, borderColor: colors.border, flex: 1 }]}
@@ -211,8 +228,8 @@ export default function DailyLogScreen() {
           />
           <View style={styles.quickBtns}>
             {[20, 30, 50].map((a) => (
-              <TouchableOpacity key={a} style={[styles.quickBtn, { backgroundColor: '#9C27B020' }]} onPress={() => quickAdd('protein', a)}>
-                <Text style={{ color: '#9C27B0', fontSize: 12, fontWeight: '600' }}>+{a}g</Text>
+              <TouchableOpacity key={a} style={[styles.quickBtn, { backgroundColor: colors.metricProtein + '22' }]} onPress={() => quickAdd('protein', a)}>
+                <Text style={{ color: colors.metricProtein, fontSize: 12, fontWeight: '600' }}>+{a}g</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -223,7 +240,7 @@ export default function DailyLogScreen() {
       </LogCard>
 
       {/* Fiber */}
-      <LogCard title="Fiber Intake" icon="leaf" iconColor="#4CAF50">
+      <LogCard title="Fiber Intake" icon="leaf" iconColor={colors.neonGlow}>
         <View style={styles.inputRow}>
           <TextInput
             style={[styles.numInput, { color: colors.text, borderColor: colors.border, flex: 1 }]}
@@ -232,8 +249,8 @@ export default function DailyLogScreen() {
           />
           <View style={styles.quickBtns}>
             {[5, 10, 15].map((a) => (
-              <TouchableOpacity key={a} style={[styles.quickBtn, { backgroundColor: '#4CAF5020' }]} onPress={() => quickAdd('fiber', a)}>
-                <Text style={{ color: '#4CAF50', fontSize: 12, fontWeight: '600' }}>+{a}g</Text>
+              <TouchableOpacity key={a} style={[styles.quickBtn, { backgroundColor: colors.neonGlow + '22' }]} onPress={() => quickAdd('fiber', a)}>
+                <Text style={{ color: colors.neonGlow, fontSize: 12, fontWeight: '600' }}>+{a}g</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -242,7 +259,7 @@ export default function DailyLogScreen() {
       </LogCard>
 
       {/* Sleep */}
-      <LogCard title="Sleep" icon="sleep" iconColor="#607D8B">
+      <LogCard title="Sleep" icon="sleep" iconColor={colors.secondary}>
         <TextInput
           style={[styles.numInput, { color: colors.text, borderColor: colors.border }]}
           placeholder="0.0" placeholderTextColor={colors.textDisabled}
@@ -252,7 +269,7 @@ export default function DailyLogScreen() {
       </LogCard>
 
       {/* Mood */}
-      <LogCard title="Today's Mood" icon="emoticon" iconColor="#FF9800">
+      <LogCard title="Today's Mood" icon="emoticon" iconColor={colors.warning}>
         <View style={styles.moodRow}>
           {MOOD_OPTIONS.map((option) => {
             const selected = form.mood === option.value;
@@ -280,6 +297,7 @@ export default function DailyLogScreen() {
 
       <View style={{ height: 120 }} />
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -290,7 +308,7 @@ const styles = StyleSheet.create({
   pageTitle: { fontSize: 28, fontWeight: '900', letterSpacing: -0.8 },
   pageDate: { fontSize: 14, marginTop: 4 },
   saveStatus: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1, minWidth: 80, alignItems: 'center', justifyContent: 'center' },
-  savedText: { fontSize: 12, fontWeight: '700', color: '#00C853' },
+  savedText: { fontSize: 12, fontWeight: '700' },
   autoSaveHint: { fontSize: 11, fontWeight: '500' },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   numInput: { borderWidth: 1.5, borderRadius: borderRadius.md, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, fontWeight: '600' },
@@ -301,4 +319,6 @@ const styles = StyleSheet.create({
   moodBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: borderRadius.md, gap: 4, marginHorizontal: 2 },
   moodLabel: { fontSize: 9, fontWeight: '600' },
   notesInput: { borderWidth: 1.5, borderRadius: borderRadius.md, padding: 14, fontSize: 14, minHeight: 100 },
-});
+}
+    
+  );

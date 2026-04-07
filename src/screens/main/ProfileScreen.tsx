@@ -1,30 +1,39 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import {
   Alert, Platform, RefreshControl, ScrollView, StyleSheet,
-  Switch, Text, TextInput, TouchableOpacity, View, Image,
+  Switch, Text, TextInput, TouchableOpacity, View, Image, ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import AppIcon from '../../components/AppIcon';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useTheme } from '../../context/ThemeContext';
 import { notificationService } from '../../services/notifications';
 import { databaseService } from '../../services/database';
+import { storageService } from '../../services/storage';
+import { supabase } from '../../services/supabase';
 import { recalculateStreak, getUnlockedBadgeIds } from '../../services/streaks';
+import { socialService, FollowCounts } from '../../services/socialService';
 import { calculateAPS } from '../../utils/performanceScore';
 import { BADGE_DEFINITIONS } from '../../constants/badges';
 import { borderRadius, spacing } from '../../constants/theme';
-import moment from 'moment';
+import dayjs from '../../utils/dayjs';
+import { TAB_BAR_HEIGHT } from '../../constants/layout';
 
-const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 100 : 88;
 
 export default function ProfileScreen() {
   const { user, signOut, updateProfile, deleteAccount } = useAuth();
   const { colors, setMode, mode } = useTheme();
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const { scheduleReminders } = useNotifications();
 
   const [refreshing, setRefreshing] = useState(false);
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false); // FIX: track upload state
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     fullName: user?.fullName ?? '',
@@ -36,6 +45,9 @@ export default function ProfileScreen() {
   const [totalActivities, setTotalActivities] = useState(0);
   const [totalDistance, setTotalDistance] = useState(0);
   const [apsScore, setApsScore] = useState(0);
+  const [followCounts, setFollowCounts] = useState<FollowCounts>({ followers: 0, following: 0 });
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [privacyLoading, setPrivacyLoading] = useState(false);
 
   const [reminderSettings, setReminderSettings] = useState({
     dailyMotivation: true,
@@ -62,10 +74,24 @@ export default function ProfileScreen() {
     setTotalActivities(acts_.length);
     setTotalDistance(acts_.reduce((sum, a) => sum + (a.distance ?? 0), 0));
 
+    // Social follow counts + privacy
+    const [counts, privacy] = await Promise.all([
+      socialService.getFollowCounts(user.id),
+      socialService.getProfilePrivacy(),
+    ]);
+    setFollowCounts(counts);
+    setIsPrivate(privacy);
+
+    // FIX: load persisted avatar URL from AsyncStorage (set on upload)
+    try {
+      const savedAvatar = await AsyncStorage.getItem('@epexfit_avatar_url');
+      if (savedAvatar) setAvatarUri(savedAvatar);
+    } catch { /* ignore */ }
+
     // APS from today's log
     const { data: log } = await databaseService.getDailyLog(user.id, new Date());
     const aps = calculateAPS({
-      plannedWorkouts: 5, completedWorkouts: acts_.filter(a => moment(a.startTime).isSame(moment(), 'week')).length,
+      plannedWorkouts: 5, completedWorkouts: acts_.filter(a => dayjs(a.startTime).isSame(dayjs(), 'week')).length,
       stepGoal: 10000, stepsToday: log?.steps ?? 0,
       calGoal: 500, calBurned: log?.calories ?? 0,
       proteinGoal: 120, proteinActual: log?.protein ?? 0,
@@ -78,11 +104,35 @@ export default function ProfileScreen() {
   useEffect(() => { loadData(); }, [user?.id]);
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
 
+  // FIX: pickImage now uploads to Supabase Storage and persists the URL
+  // Previously it only set local state — photo was lost on every app restart (silent data loss)
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission needed', 'Allow photo library access'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.7 });
-    if (!result.canceled) setAvatarUri(result.assets[0].uri);
+    if (status !== 'granted') { Alert.alert('Permission needed', 'Allow photo library access to set a profile photo.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (!result.canceled && user) {
+      const uri = result.assets[0].uri;
+      setAvatarUri(uri); // optimistic UI — show immediately
+      setAvatarUploading(true);
+      try {
+        const { url, error } = await storageService.uploadAvatar(user.id, uri);
+        if (error || !url) throw error ?? new Error('Upload returned no URL');
+        // Persist URL to profiles table
+        await supabase.from('profiles').update({ avatar_url: url }).eq('id', user.id);
+        // Cache locally so it loads instantly on next open
+        await AsyncStorage.setItem('@epexfit_avatar_url', url);
+      } catch (err: any) {
+        Alert.alert('Upload Failed', err?.message ?? 'Could not save your photo. Please try again.');
+        setAvatarUri(null); // revert optimistic update
+      } finally {
+        setAvatarUploading(false);
+      }
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -112,10 +162,20 @@ export default function ProfileScreen() {
     ]
   );
 
-  const handleSaveReminders = async () => {
+const handleSaveReminders = async () => {
     await scheduleReminders(reminderSettings);
-    await notificationService.scheduleReminders(reminderSettings);
     Alert.alert('Saved', 'Reminders updated');
+  };
+
+  const handlePrivacyToggle = async (value: boolean) => {
+    setIsPrivate(value);
+    setPrivacyLoading(true);
+    const { error } = await socialService.setProfilePrivacy(value);
+    if (error) {
+      setIsPrivate(!value); // revert
+      Alert.alert('Error', 'Could not update privacy setting.');
+    }
+    setPrivacyLoading(false);
   };
 
   const getBMI = () => {
@@ -134,17 +194,18 @@ export default function ProfileScreen() {
 
   const REMINDER_KEYS = ['walking', 'workout', 'water', 'protein', 'fiber'] as const;
   const REMINDER_LABELS: Record<string, { label: string; icon: string; color: string }> = {
-    walking: { label: 'Walking',  icon: 'walk',       color: '#6C8EFF' },
+    walking: { label: 'Walking',  icon: 'walk',       color: colors.secondary },
     workout: { label: 'Workout',  icon: 'dumbbell',   color: colors.primary },
-    water:   { label: 'Water',    icon: 'water',      color: '#4D9FFF' },
-    protein: { label: 'Protein',  icon: 'food-steak', color: '#C084FC' },
-    fiber:   { label: 'Fiber',    icon: 'leaf',       color: '#4ADE80' },
+    water:   { label: 'Water',    icon: 'water',      color: colors.metricHydration },
+    protein: { label: 'Protein',  icon: 'food-steak', color: colors.metricProtein },
+    fiber:   { label: 'Fiber',    icon: 'leaf',       color: colors.neonGlow },
   };
 
   const accent = colors.primary;
   const unlockedCount = unlockedBadgeIds.length;
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={{ paddingBottom: TAB_BAR_HEIGHT + 20, padding: spacing.md }}
@@ -153,7 +214,7 @@ export default function ProfileScreen() {
     >
       {/* Profile Hero */}
       <View style={[styles.heroCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-        <TouchableOpacity onPress={pickImage} activeOpacity={0.8}>
+        <TouchableOpacity onPress={pickImage} activeOpacity={0.8} disabled={avatarUploading}>
           <View style={[styles.avatarWrap, { backgroundColor: accent + '20', borderColor: accent + '40' }]}>
             {avatarUri ? (
               <Image source={{ uri: avatarUri }} style={{ width: 80, height: 80, borderRadius: 28 }} />
@@ -162,7 +223,13 @@ export default function ProfileScreen() {
                 {user?.fullName?.charAt(0)?.toUpperCase() ?? 'U'}
               </Text>
             )}
-            <View style={styles.cameraOverlay}><Text style={{ fontSize: 14 }}>📷</Text></View>
+            {/* FIX: show upload spinner while uploading, camera icon otherwise */}
+            <View style={styles.cameraOverlay}>
+              {avatarUploading
+                ? <ActivityIndicator size="small" color="#FFFFFF" />
+                : <Text style={{ fontSize: 14 }}>📷</Text>
+              }
+            </View>
           </View>
         </TouchableOpacity>
 
@@ -172,12 +239,24 @@ export default function ProfileScreen() {
             <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{user?.email}</Text>
             {/* Streak badge */}
             {streak > 0 && (
-              <View style={[styles.streakBadge, { backgroundColor: '#FF6B0020', borderColor: '#FF6B0050' }]}>
+              <View style={[styles.streakBadge, { backgroundColor: colors.metricStreak + '22', borderColor: colors.metricStreak + '55' }]}>
                 <Text style={{ fontSize: 16 }}>🔥</Text>
-                <Text style={{ fontSize: 16, fontWeight: '900', color: '#FF9500' }}>{streak}</Text>
-                <Text style={{ fontSize: 11, color: '#FF9500', fontWeight: '600' }}>day streak</Text>
+                <Text style={{ fontSize: 16, fontWeight: '900', color: colors.metricStreak }}>{streak}</Text>
+                <Text style={{ fontSize: 11, color: colors.metricStreak, fontWeight: '600' }}>day streak</Text>
               </View>
             )}
+            {/* Follow counts */}
+            <View style={styles.followRow}>
+              <TouchableOpacity style={styles.followStat} onPress={() => user && navigation.navigate('FollowersList', { userId: user.id, type: 'followers', userName: user.fullName })}>
+                <Text style={[styles.followNum, { color: colors.text }]}>{followCounts.followers}</Text>
+                <Text style={[styles.followLbl, { color: colors.textSecondary }]}>Followers</Text>
+              </TouchableOpacity>
+              <View style={[styles.followDivider, { backgroundColor: colors.border }]} />
+              <TouchableOpacity style={styles.followStat} onPress={() => user && navigation.navigate('FollowersList', { userId: user.id, type: 'following', userName: user.fullName })}>
+                <Text style={[styles.followNum, { color: colors.text }]}>{followCounts.following}</Text>
+                <Text style={[styles.followLbl, { color: colors.textSecondary }]}>Following</Text>
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity style={[styles.editBtn, { borderColor: accent + '60', backgroundColor: accent + '10' }]} onPress={() => setIsEditing(true)}>
               <AppIcon name="pencil" size={13} color={accent} />
               <Text style={{ fontSize: 12, color: accent, fontWeight: '700' }}>Edit Profile</Text>
@@ -203,7 +282,7 @@ export default function ProfileScreen() {
                 <Text style={{ color: colors.textSecondary, fontWeight: '700' }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.saveBtn, { backgroundColor: accent }]} onPress={handleSaveProfile}>
-                <Text style={{ color: '#000', fontWeight: '800' }}>Save</Text>
+                <Text style={{ color: colors.onPrimary, fontWeight: '800' }}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -219,17 +298,17 @@ export default function ProfileScreen() {
           <Text style={[styles.statLbl, { color: colors.textSecondary }]}>APS Score</Text>
         </View>
         <View style={[styles.statCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-          <Text style={[styles.statVal, { color: '#FF9500' }]}>{streak}</Text>
+          <Text style={[styles.statVal, { color: colors.metricStreak }]}>{streak}</Text>
           <Text style={[styles.statUnit, { color: colors.textDisabled }]}>days</Text>
           <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Streak</Text>
         </View>
         <View style={[styles.statCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-          <Text style={[styles.statVal, { color: '#4D9FFF' }]}>{totalActivities}</Text>
+          <Text style={[styles.statVal, { color: colors.metricDistance }]}>{totalActivities}</Text>
           <Text style={[styles.statUnit, { color: colors.textDisabled }]}>total</Text>
           <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Activities</Text>
         </View>
         <View style={[styles.statCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-          <Text style={[styles.statVal, { color: '#00F5C4' }]}>{totalDistance.toFixed(0)}</Text>
+          <Text style={[styles.statVal, { color: colors.neonGlow }]}>{totalDistance.toFixed(0)}</Text>
           <Text style={[styles.statUnit, { color: colors.textDisabled }]}>km</Text>
           <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Distance</Text>
         </View>
@@ -239,8 +318,8 @@ export default function ProfileScreen() {
       <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>BODY STATS</Text>
       <View style={styles.bodyRow}>
         {[
-          { label: 'Height', val: user?.height ? `${user.height}` : '—', unit: 'cm', color: '#4D9FFF' },
-          { label: 'Weight', val: user?.weight ? `${user.weight}` : '—', unit: 'kg', color: '#FF5B5B' },
+          { label: 'Height', val: user?.height ? `${user.height}` : '—', unit: 'cm', color: colors.metricDistance },
+          { label: 'Weight', val: user?.weight ? `${user.weight}` : '—', unit: 'kg', color: colors.metricBurn },
           { label: 'BMI', val: getBMI() ?? '—', unit: getBMICategory(), color: accent },
         ].map((s) => (
           <View key={s.label} style={[styles.bodyCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
@@ -310,6 +389,33 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* Privacy */}
+      <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>PRIVACY</Text>
+      <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <View style={[{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: (isPrivate ? '#94A3B8' : accent) + '18' }]}>
+            <Text style={{ fontSize: 20 }}>{isPrivate ? '🔒' : '🌐'}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>
+              {isPrivate ? 'Private Profile' : 'Public Profile'}
+            </Text>
+            <Text style={[{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }]}>
+              {isPrivate ? 'Only followers can see your achievements' : 'Anyone can view your profile'}
+            </Text>
+          </View>
+          {privacyLoading
+            ? <ActivityIndicator size="small" color={accent} />
+            : <Switch
+                value={isPrivate}
+                onValueChange={handlePrivacyToggle}
+                trackColor={{ false: colors.border, true: accent + '60' }}
+                thumbColor={isPrivate ? accent : colors.textDisabled}
+              />
+          }
+        </View>
+      </View>
+
       {/* Reminders */}
       <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>REMINDERS</Text>
       <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
@@ -326,10 +432,18 @@ export default function ProfileScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.reminderLabel, { color: colors.text }]}>{meta.label}</Text>
-                {/* FIXED: Show time as non-editable display with tap to edit hint */}
-                <Text style={[styles.reminderTime, { color: colors.textSecondary }]}>
-                  {setting.time} · {setting.enabled ? 'On' : 'Off'}
-                </Text>
+                <TextInput
+                  style={[styles.reminderTime, { color: accent, fontWeight: '700' }]}
+                  value={setting.time}
+                  onChangeText={(val) => {
+                    const clean = val.replace(/[^0-9:]/g, '').slice(0, 5);
+                    setReminderSettings(p => ({ ...p, [key]: { ...p[key], time: clean } }));
+                  }}
+                  keyboardType="numbers-and-punctuation"
+                  placeholder="HH:MM"
+                  placeholderTextColor={colors.textDisabled}
+                  maxLength={5}
+                />
               </View>
               <Switch
                 value={setting.enabled}
@@ -341,7 +455,7 @@ export default function ProfileScreen() {
           );
         })}
         <TouchableOpacity style={[styles.saveRemBtn, { backgroundColor: accent }]} onPress={handleSaveReminders}>
-          <Text style={styles.saveRemBtnText}>Save Reminders</Text>
+          <Text style={[styles.saveRemBtnText, { color: colors.onPrimary }]}>Save Reminders</Text>
         </TouchableOpacity>
       </View>
 
@@ -353,6 +467,7 @@ export default function ProfileScreen() {
         <Text style={[styles.deleteText, { color: colors.textDisabled }]}>Delete Account</Text>
       </TouchableOpacity>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -365,6 +480,11 @@ const styles = StyleSheet.create({
   userName: { fontSize: 20, fontWeight: '900', letterSpacing: -0.4 },
   userEmail: { fontSize: 13, fontWeight: '500' },
   streakBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, marginTop: 4 },
+  followRow: { flexDirection: 'row', alignItems: 'center', gap: 0, marginTop: 4 },
+  followStat: { alignItems: 'center', paddingHorizontal: 20, paddingVertical: 4 },
+  followNum: { fontSize: 18, fontWeight: '900', letterSpacing: -0.5 },
+  followLbl: { fontSize: 11, fontWeight: '600', marginTop: 1 },
+  followDivider: { width: 1, height: 28, borderRadius: 1 },
   editBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, marginTop: 4 },
   editForm: { width: '100%', gap: 10 },
   editInput: { borderWidth: 1.5, borderRadius: borderRadius.lg, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, fontWeight: '500' },
@@ -393,9 +513,10 @@ const styles = StyleSheet.create({
   reminderLabel: { fontSize: 14, fontWeight: '700' },
   reminderTime: { fontSize: 12, fontWeight: '500', marginTop: 2 },
   saveRemBtn: { height: 48, borderRadius: borderRadius.lg, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
-  saveRemBtnText: { color: '#000', fontSize: 14, fontWeight: '800', letterSpacing: 0.3 },
+  saveRemBtnText: { fontSize: 14, fontWeight: '800', letterSpacing: 0.3 },
   signOutBtn: { height: 52, borderRadius: borderRadius.xl, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   signOutText: { fontSize: 15, fontWeight: '800' },
   deleteBtn: { height: 44, borderRadius: borderRadius.xl, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   deleteText: { fontSize: 13, fontWeight: '600' },
-});
+}
+  );

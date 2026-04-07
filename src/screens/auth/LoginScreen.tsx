@@ -3,32 +3,27 @@ import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
   ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, StatusBar,
 } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { borderRadius } from '../../constants/theme';
+import AppIconCircle from '../../components/AppIconCircle';
 
-function EpexLogo({ size = 72 }: { size?: number }) {
+// Official Google brand SVG (unchanged colors — brand requirement) (was plain letter "G" — violates Google brand guidelines)
+function GoogleLogo({ size = 18 }: { size?: number }) {
   return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{
-        width: size, height: size, borderRadius: size * 0.24,
-        backgroundColor: '#F5C842', alignItems: 'center', justifyContent: 'center',
-        transform: [{ rotate: '45deg' }],
-      }}>
-        <View style={{
-          width: size * 0.7, height: size * 0.7, borderRadius: size * 0.15,
-          backgroundColor: '#0A0B10', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <View style={{ transform: [{ rotate: '-45deg' }], alignItems: 'center' }}>
-            <View style={{ width: size * 0.17, height: size * 0.3, backgroundColor: '#F5C842', borderRadius: 2, marginBottom: -size * 0.04 }} />
-            <View style={{ width: size * 0.28, height: size * 0.04, backgroundColor: '#F5C842', borderRadius: 2 }} />
-            <View style={{ width: size * 0.17, height: size * 0.24, backgroundColor: '#F5C842', borderRadius: 2, marginTop: -size * 0.04 }} />
-          </View>
-        </View>
-      </View>
-    </View>
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+      <Path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <Path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+      <Path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+    </Svg>
   );
 }
+
+// FIX: Email validation regex (client-side — was missing entirely)
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
@@ -39,10 +34,16 @@ export default function LoginScreen({ navigation }: any) {
 
   const { signIn, signInWithGoogle } = useAuth();
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
       Alert.alert('Missing Fields', 'Please enter your email and password.');
+      return;
+    }
+    // FIX: validate email format before hitting the API
+    if (!EMAIL_REGEX.test(email.trim())) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address (e.g. you@example.com).');
       return;
     }
     setLoading(true);
@@ -57,8 +58,8 @@ export default function LoginScreen({ navigation }: any) {
     setLoading(true);
     const { success, error } = await signInWithGoogle();
     setLoading(false);
-    if (!success) {
-      Alert.alert('Google Sign In Failed', error?.message || 'Please try again.');
+    if (!success && error?.message && !error.message.toLowerCase().includes('cancel')) {
+      Alert.alert('Google Sign In Failed', error.message || 'Please try again.');
     }
   };
 
@@ -66,21 +67,21 @@ export default function LoginScreen({ navigation }: any) {
   const focusColor = (field: string) => focused === field ? accent : colors.border;
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      {/* FIX: dynamic StatusBar — was hardcoded light-content, invisible on light theme iOS */}
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
+      <ScrollView contentContainerStyle={[styles.scroll, { }]} showsVerticalScrollIndicator={false}>
 
-        {/* Logo area */}
         <View style={styles.logoArea}>
-          <EpexLogo size={72} />
+          <AppIconCircle size={76} ringColor={colors.primary} glowColor={colors.primary} />
           <Text style={[styles.brand, { color: colors.text }]}>EPEXFIT</Text>
-          <Text style={[styles.tagline, { color: colors.textSecondary }]}>Train smarter. Live stronger.</Text>
+          <Text style={[styles.tagline, { color: colors.textSecondary }]}>Precision training. Real momentum.</Text>
         </View>
 
-        {/* Form card */}
         <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.text }]}>Welcome back</Text>
           <Text style={[styles.cardSub, { color: colors.textSecondary }]}>Sign in to continue your journey</Text>
@@ -97,6 +98,7 @@ export default function LoginScreen({ navigation }: any) {
                 onChangeText={setEmail}
                 autoCapitalize="none"
                 keyboardType="email-address"
+                autoComplete="email"
                 onFocus={() => setFocused('email')}
                 onBlur={() => setFocused(null)}
               />
@@ -125,14 +127,10 @@ export default function LoginScreen({ navigation }: any) {
             </View>
           </View>
 
-          <TouchableOpacity
-            onPress={() => navigation.navigate('ForgotPassword')}
-            style={styles.forgotBtn}
-          >
+          <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword')} style={styles.forgotBtn}>
             <Text style={[styles.forgotText, { color: accent }]}>Forgot password?</Text>
           </TouchableOpacity>
 
-          {/* Sign in */}
           <TouchableOpacity
             style={[styles.primaryBtn, { backgroundColor: accent }, loading && { opacity: 0.7 }]}
             onPress={handleLogin}
@@ -140,32 +138,30 @@ export default function LoginScreen({ navigation }: any) {
             activeOpacity={0.85}
           >
             {loading ? (
-              <ActivityIndicator color="#000" />
+              <ActivityIndicator color={colors.onPrimary} />
             ) : (
-              <Text style={styles.primaryBtnText}>Sign In</Text>
+              <Text style={[styles.primaryBtnText, { color: colors.onPrimary }]}>Sign In</Text>
             )}
           </TouchableOpacity>
 
-          {/* Divider */}
           <View style={styles.dividerRow}>
             <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
             <Text style={[styles.dividerText, { color: colors.textDisabled }]}>or</Text>
             <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
           </View>
 
-          {/* Google */}
+          {/* FIX: official Google SVG logo */}
           <TouchableOpacity
             style={[styles.googleBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={handleGoogle}
             disabled={loading}
             activeOpacity={0.8}
           >
-            <Text style={{ fontSize: 17 }}>G</Text>
+            <GoogleLogo size={18} />
             <Text style={[styles.googleBtnText, { color: colors.text }]}>Continue with Google</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Register link */}
         <View style={styles.registerRow}>
           <Text style={[styles.registerText, { color: colors.textSecondary }]}>New to EpexFit? </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Register')}>
@@ -174,12 +170,12 @@ export default function LoginScreen({ navigation }: any) {
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView> 
   );
 }
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scroll: { padding: 24, paddingTop: Platform.OS === 'ios' ? 80 : 60, paddingBottom: 40 },
+  scroll: { padding: 24, paddingBottom: 40 },
 
   logoArea: { alignItems: 'center', marginBottom: 40, gap: 12 },
   brand: { fontSize: 28, fontWeight: '900', letterSpacing: 5 },
@@ -199,7 +195,7 @@ const styles = StyleSheet.create({
   forgotText: { fontSize: 12, fontWeight: '700' },
 
   primaryBtn: { height: 54, borderRadius: borderRadius.full, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  primaryBtnText: { fontSize: 15, fontWeight: '900', color: '#000', letterSpacing: 0.4 },
+  primaryBtnText: { fontSize: 15, fontWeight: '900', letterSpacing: 0.4 },
 
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
   dividerLine: { flex: 1, height: 1 },

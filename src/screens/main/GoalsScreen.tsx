@@ -1,30 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, TextInput, Alert, RefreshControl, Platform,
+  Modal, TextInput, Alert, RefreshControl,
 } from 'react-native';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { databaseService } from '../../services/database';
 import { Goal } from '../../types';
 import AppIcon from '../../components/AppIcon';
 import { borderRadius, spacing } from '../../constants/theme';
-import moment from 'moment';
-
-const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 100 : 88;
+import { TAB_BAR_HEIGHT } from '../../constants/layout';
+import dayjs from '../../utils/dayjs';
 
 const GOAL_PRESETS = [
-  { type: 'steps', label: 'Daily Steps', icon: 'shoe-print', unit: 'steps', defaultTarget: 10000, period: 'daily', description: 'Walk 10,000 steps every day', color: '#4CAF50', minTarget: 1000, maxTarget: 30000, stepSize: 500 },
-  { type: 'running', label: 'Running Distance', icon: 'run', unit: 'km', defaultTarget: 5, period: 'weekly', description: 'Run 5 km per week', color: '#FF5722', minTarget: 1, maxTarget: 100, stepSize: 1 },
-  { type: 'water', label: 'Water Intake', icon: 'water', unit: 'glasses', defaultTarget: 8, period: 'daily', description: 'Drink 8 glasses of water daily', color: '#00BCD4', minTarget: 4, maxTarget: 20, stepSize: 1 },
-  { type: 'calories', label: 'Calorie Burn', icon: 'fire', unit: 'kcal', defaultTarget: 500, period: 'daily', description: 'Burn 500 calories daily', color: '#F44336', minTarget: 100, maxTarget: 2000, stepSize: 50 },
-  { type: 'weight', label: 'Target Weight', icon: 'scale-bathroom', unit: 'kg', defaultTarget: 70, period: 'longterm', description: 'Reach your ideal weight', color: '#2196F3', minTarget: 30, maxTarget: 200, stepSize: 0.5 },
-  { type: 'protein', label: 'Protein Intake', icon: 'food-steak', unit: 'g', defaultTarget: 120, period: 'daily', description: 'Eat 120g protein every day', color: '#9C27B0', minTarget: 30, maxTarget: 300, stepSize: 5 },
+  { type: 'steps', label: 'Daily Steps', icon: 'shoe-print', unit: 'steps', defaultTarget: 10000, period: 'daily', description: 'Walk 10,000 steps every day', color: '#4ADE80', minTarget: 1000, maxTarget: 30000, stepSize: 500 },
+  { type: 'running', label: 'Running Distance', icon: 'run', unit: 'km', defaultTarget: 5, period: 'weekly', description: 'Run 5 km per week', color: '#FB7185', minTarget: 1, maxTarget: 100, stepSize: 1 },
+  { type: 'water', label: 'Water Intake', icon: 'water', unit: 'glasses', defaultTarget: 8, period: 'daily', description: 'Drink 8 glasses of water daily', color: '#22D3EE', minTarget: 4, maxTarget: 20, stepSize: 1 },
+  { type: 'calories', label: 'Calorie Burn', icon: 'fire', unit: 'kcal', defaultTarget: 500, period: 'daily', description: 'Burn 500 calories daily', color: '#FB7185', minTarget: 100, maxTarget: 2000, stepSize: 50 },
+  { type: 'weight', label: 'Target Weight', icon: 'scale-bathroom', unit: 'kg', defaultTarget: 70, period: 'longterm', description: 'Reach your ideal weight', color: '#38BDF8', minTarget: 30, maxTarget: 200, stepSize: 0.5 },
+  { type: 'protein', label: 'Protein Intake', icon: 'food-steak', unit: 'g', defaultTarget: 120, period: 'daily', description: 'Eat 120g protein every day', color: '#A78BFA', minTarget: 30, maxTarget: 300, stepSize: 5 },
 ] as const;
 
 type GoalPreset = (typeof GOAL_PRESETS)[number];
-
-const PERIOD_COLORS: Record<string, string> = { daily: '#4CAF50', weekly: '#FF9800', longterm: '#2196F3' };
 
 function ProgressBar({ progress, color }: { progress: number; color: string }) {
   const p = Math.min(Math.max(progress, 0), 1);
@@ -37,7 +35,13 @@ function ProgressBar({ progress, color }: { progress: number; color: string }) {
 
 export default function GoalsScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const periodColors: Record<string, string> = {
+    daily: colors.success,
+    weekly: colors.warning,
+    longterm: colors.metricDistance,
+  };
   const [goals, setGoals] = useState<Goal[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -84,7 +88,7 @@ export default function GoalsScreen() {
 
     setSaving(true);
     const daysMap: Record<string, number> = { daily: 30, weekly: 84, longterm: 180 };
-    const deadline = moment().add(daysMap[selectedPreset.period] ?? 30, 'days').toDate();
+    const deadline = dayjs().add(daysMap[selectedPreset.period] ?? 30, 'days').toDate();
 
     const { error } = await databaseService.saveGoal({
       userId: user.id,
@@ -141,15 +145,15 @@ export default function GoalsScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ScrollView
         contentContainerStyle={{ paddingBottom: TAB_BAR_HEIGHT }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
       >
-        <View style={styles.header}>
+        <View style={[styles.header, { }]}>
           <Text style={[styles.title, { color: colors.text }]}>Goals</Text>
           <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={openModal}>
-            <AppIcon name="plus" size={24} color="#FFFFFF" />
+            <AppIcon name="plus" size={24} color={colors.onPrimary} />
           </TouchableOpacity>
         </View>
 
@@ -159,7 +163,7 @@ export default function GoalsScreen() {
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No goals yet</Text>
             <Text style={[styles.emptySub, { color: colors.textSecondary }]}>Set your first goal to start tracking your progress</Text>
             <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.primary }]} onPress={openModal}>
-              <Text style={styles.emptyBtnText}>Add Goal</Text>
+              <Text style={[styles.emptyBtnText, { color: colors.onPrimary }]}>Add Goal</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -168,7 +172,7 @@ export default function GoalsScreen() {
               const preset = GOAL_PRESETS.find((p) => p.type === goal.type);
               const progress = Math.min(Number(goal.current) / Number(goal.target), 1);
               const color = preset?.color ?? colors.primary;
-              const daysLeft = moment(goal.deadline).diff(moment(), 'days');
+              const daysLeft = dayjs(goal.deadline).diff(dayjs(), 'days');
 
               return (
                 <View
@@ -183,8 +187,8 @@ export default function GoalsScreen() {
                       <Text style={[styles.goalLabel, { color: colors.text }]}>{preset?.label ?? goal.type}</Text>
                       <Text style={[styles.goalDesc, { color: colors.textSecondary }]}>{preset?.description}</Text>
                     </View>
-                    <View style={[styles.periodBadge, { backgroundColor: PERIOD_COLORS[preset?.period ?? 'daily'] + '25' }]}>
-                      <Text style={[styles.periodText, { color: PERIOD_COLORS[preset?.period ?? 'daily'] }]}>
+                    <View style={[styles.periodBadge, { backgroundColor: (periodColors[preset?.period ?? 'daily'] ?? colors.primary) + '25' }]}>
+                      <Text style={[styles.periodText, { color: periodColors[preset?.period ?? 'daily'] ?? colors.primary }]}>
                         {preset?.period ?? 'daily'}
                       </Text>
                     </View>
@@ -193,7 +197,7 @@ export default function GoalsScreen() {
                         <AppIcon name="pencil" size={18} color={colors.textSecondary} />
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => handleDeleteGoal(goal)} style={{ padding: 4 }}>
-                        <AppIcon name="trash-can" size={18} color="#FF4444" />
+                        <AppIcon name="trash-can" size={18} color={colors.errorSoft} />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -207,7 +211,7 @@ export default function GoalsScreen() {
                         / {Number(goal.target).toFixed(goal.unit === 'km' ? 1 : 0)} {goal.unit}
                       </Text>
                     </View>
-                    <ProgressBar progress={progress} color={goal.completed ? '#4CAF50' : color} />
+                    <ProgressBar progress={progress} color={goal.completed ? colors.success : color} />
                     <View style={styles.goalFooter}>
                       <Text style={[styles.goalPct, { color: color }]}>{Math.round(progress * 100)}% complete</Text>
                       <Text style={[styles.goalDays, { color: colors.textDisabled }]}>
@@ -297,7 +301,7 @@ export default function GoalsScreen() {
               onPress={handleAddGoal}
               disabled={saving}
             >
-              <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Add Goal'}</Text>
+              <Text style={[styles.saveBtnText, { color: colors.onPrimary }]}>{saving ? 'Saving...' : 'Add Goal'}</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -371,7 +375,7 @@ export default function GoalsScreen() {
                     style={[styles.saveBtn, { backgroundColor: colors.primary }]}
                     onPress={handleUpdateGoal}
                   >
-                    <Text style={styles.saveBtnText}>Update Goal</Text>
+                    <Text style={[styles.saveBtnText, { color: colors.onPrimary }]}>Update Goal</Text>
                   </TouchableOpacity>
                 </>
               );
@@ -379,20 +383,20 @@ export default function GoalsScreen() {
           </ScrollView>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, paddingTop: Platform.OS === 'ios' ? 60 : 44 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
   title: { fontSize: 28, fontWeight: '900', letterSpacing: -0.8 },
   addBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   emptyCard: { margin: 16, borderRadius: borderRadius.xl, borderWidth: 1, padding: 32, alignItems: 'center', gap: 12 },
   emptyTitle: { fontSize: 20, fontWeight: '700' },
   emptySub: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
   emptyBtn: { marginTop: 8, paddingHorizontal: 28, paddingVertical: 12, borderRadius: borderRadius.full },
-  emptyBtnText: { color: '#000000', fontSize: 15, fontWeight: '700' },
+  emptyBtnText: { fontSize: 15, fontWeight: '700' },
   goalsList: { padding: 16, gap: 12 },
   goalCard: { borderRadius: borderRadius.xl, borderWidth: 1, padding: spacing.md, gap: 14 },
   goalTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
@@ -428,7 +432,7 @@ const styles = StyleSheet.create({
   targetInput: { fontSize: 28, fontWeight: '800', width: '100%', borderBottomWidth: 2, paddingBottom: 4 },
   targetUnit: { fontSize: 14, marginTop: 4 },
   saveBtn: { marginTop: 24, height: 54, borderRadius: borderRadius.xl, alignItems: 'center', justifyContent: 'center' },
-  saveBtnText: { color: '#000000', fontSize: 16, fontWeight: '800' },
+  saveBtnText: { fontSize: 16, fontWeight: '800' },
   currentGoalCard: { borderRadius: borderRadius.xl, borderWidth: 1, padding: spacing.md },
   goalCurrentSmall: { fontSize: 12, marginTop: 4 },
 });

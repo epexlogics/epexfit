@@ -5,6 +5,7 @@ import * as TaskManager from 'expo-task-manager';
 import { Pedometer } from 'expo-sensors';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { databaseService } from '../services/database';
+import { socialService } from '../services/socialService';
 import { Activity, LocationPoint, TrackingState } from '../types';
 import { useAuth } from './AuthContext';
 
@@ -109,6 +110,27 @@ export const TrackingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const lastStepsRef = useRef(0);
   const announcedKmRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const midnightResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Midnight pedometer reset — steps from yesterday should not bleed into today
+  useEffect(() => {
+    const scheduleMidnightReset = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setDate(now.getDate() + 1);
+      nextMidnight.setHours(0, 0, 0, 0);
+      const msUntilMidnight = nextMidnight.getTime() - now.getTime();
+      midnightResetRef.current = setTimeout(() => {
+        lastStepsRef.current = 0;
+        setState((prev) => ({ ...prev, steps: 0 }));
+        scheduleMidnightReset();
+      }, msUntilMidnight);
+    };
+    scheduleMidnightReset();
+    return () => {
+      if (midnightResetRef.current) clearTimeout(midnightResetRef.current);
+    };
+  }, []);
 
   // Restore in-progress session after app restart
   useEffect(() => {
@@ -176,8 +198,10 @@ export const TrackingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
       if (bgStatus !== 'granted') throw new Error('Background location permission denied');
 
-      const { status: pedStatus } = await Pedometer.requestPermissionsAsync();
-      if (pedStatus !== 'granted') throw new Error('Pedometer permission denied');
+      // Pedometer permission - non-fatal on Android (not all devices support it)
+      try {
+        await Pedometer.requestPermissionsAsync();
+      } catch { /* Pedometer not available on this device */ }
 
       const now = new Date();
       startTimeRef.current = now;
@@ -203,9 +227,14 @@ export const TrackingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         error: null,
       });
 
-      // Pedometer
+      // FIX: only start pedometer for ambulatory activities
+      // Swimming, cycling, yoga, HIIT, strength = GPS-only distance tracking
+      // Pedometer was previously active for ALL activity types, creating nonsense step counts
+      const AMBULATORY_ACTIVITIES: ActivityType[] = ['walking', 'running', 'football', 'other'];
+      const shouldTrackSteps = AMBULATORY_ACTIVITIES.includes(type);
+
       const isAvailable = await Pedometer.isAvailableAsync();
-      if (isAvailable) {
+      if (isAvailable && shouldTrackSteps) {
         pedometerSub.current = Pedometer.watchStepCount((result) => {
           setState((prev) => {
             const steps = Math.max(result.steps, lastStepsRef.current);
@@ -383,6 +412,14 @@ export const TrackingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     resetTracking();
     await AsyncStorage.multiRemove([TRACKING_SESSION_KEY, TRACKING_BG_POINTS_KEY]);
     await syncGoalsAndDailyLog(activityData);
+
+    // Publish to social feed (non-blocking, never crashes)
+    socialService.publishFeedEvent('activity_completed', {
+      activityType: activityData.type,
+      distance: activityData.distance,
+      duration: activityData.duration,
+      calories: activityData.calories,
+    });
 
     return savedActivity;
   };

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { databaseService } from '../../services/database';
@@ -7,7 +8,7 @@ import { Activity } from '../../types';
 import AppIcon from '../../components/AppIcon';
 import { borderRadius, spacing } from '../../constants/theme';
 import { formatPace } from '../../utils/paceUtils';
-import moment from 'moment';
+import dayjs from '../../utils/dayjs';
 
 // Expanded to all activity types
 const TYPE_META: Record<string, { icon: string; color: string; label: string }> = {
@@ -91,11 +92,12 @@ export default function HistoryScreen({ navigation }: any) {
   const accentColor = colors.primary;
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accentColor} />}
     >
-      <View style={styles.pageHeader}>
+      <View style={[styles.pageHeader, { }]}>
         <Text style={[styles.title, { color: colors.text }]}>Activity History</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           {activities.length} total · {filtered.length} shown
@@ -197,7 +199,7 @@ export default function HistoryScreen({ navigation }: any) {
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.actType, { color: colors.text }]}>{meta.label}</Text>
                     <Text style={[styles.actDate, { color: colors.textSecondary }]}>
-                      {moment(activity.startTime).format('MMM DD, YYYY · h:mm A')}
+                      {dayjs(activity.startTime).format('MMM DD, YYYY · h:mm A')}
                     </Text>
                   </View>
                   <AppIcon name="chevron-right" size={16} color={colors.textDisabled} />
@@ -238,12 +240,13 @@ export default function HistoryScreen({ navigation }: any) {
       </View>
       <View style={{ height: 110 }} />
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  pageHeader: { paddingHorizontal: 16, paddingTop: 60, paddingBottom: 8 },
+  pageHeader: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   title: { fontSize: 28, fontWeight: '900', letterSpacing: -0.8 },
   subtitle: { marginTop: 2, fontSize: 13 },
   prBanner: { marginHorizontal: 16, marginBottom: 8, borderRadius: borderRadius.xl, borderWidth: 1, padding: 16 },
@@ -269,4 +272,6 @@ const styles = StyleSheet.create({
   statItem: { alignItems: 'center', gap: 3 },
   statVal: { fontSize: 13, fontWeight: '700' },
   statLbl: { fontSize: 10, fontWeight: '500' },
-});
+}
+    
+  );

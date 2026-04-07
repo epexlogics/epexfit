@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 const REMINDER_SETTINGS_KEY = '@epexfit_reminder_settings';
 const LAST_NOTIF_KEY        = '@epexfit_last_notif_ts';
-const MIN_NOTIF_GAP_MS      = 3 * 60 * 60 * 1000; // 3 hours between any two notifs
+const MIN_NOTIF_GAP_MS      = 3 * 60 * 60 * 1000;
 
 export interface ReminderSettings {
   dailyMotivation: boolean;
@@ -16,7 +16,6 @@ export interface ReminderSettings {
   fiber:    { enabled: boolean; time: string };
 }
 
-// ── Smart notification payload types ─────────────────────────────────────
 export interface SmartNotifParams {
   stepsToday:     number;
   stepGoal:       number;
@@ -25,12 +24,11 @@ export interface SmartNotifParams {
   distanceGoal?:  number;
   waterToday?:    number;
   waterGoal?:     number;
-  lastActiveDate?: string; // YYYY-MM-DD
+  lastActiveDate?: string;
 }
 
 export class NotificationService {
 
-  // ── Permission helpers ──────────────────────────────────────────────────
   async requestPermissionsAndCheck(): Promise<boolean> {
     try {
       const { status: existing } = await Notifications.getPermissionsAsync();
@@ -52,16 +50,15 @@ export class NotificationService {
     } catch { return false; }
   }
 
-  // ── Rate-limit guard: max 2 notifs/day, min 3h apart ───────────────────
   private async canSendNotif(): Promise<boolean> {
     try {
       const raw = await AsyncStorage.getItem(LAST_NOTIF_KEY);
       if (!raw) return true;
       const { ts, count, date } = JSON.parse(raw);
       const today = new Date().toISOString().split('T')[0];
-      if (date !== today) return true; // new day
-      if (count >= 2) return false;    // already 2 today
-      if (Date.now() - ts < MIN_NOTIF_GAP_MS) return false; // too soon
+      if (date !== today) return true;
+      if (count >= 2) return false;
+      if (Date.now() - ts < MIN_NOTIF_GAP_MS) return false;
       return true;
     } catch { return true; }
   }
@@ -86,16 +83,13 @@ export class NotificationService {
     await this.recordNotifSent();
   }
 
-  // ── SMART NOTIFICATION STRATEGY ────────────────────────────────────────
   async evaluateAndSend(params: SmartNotifParams): Promise<void> {
     const ok = await this.requestPermissionsAndCheck();
     if (!ok) return;
     if (!(await this.canSendNotif())) return;
 
-    const hour  = new Date().getHours();
-    const today = new Date().toISOString().split('T')[0];
+    const hour = new Date().getHours();
 
-    // 1. Streak at risk (8pm, goal not met)
     if (hour >= 20 && params.stepsToday < params.stepGoal && params.streak > 0) {
       const remaining = params.stepGoal - params.stepsToday;
       await this.sendImmediate(
@@ -105,20 +99,18 @@ export class NotificationService {
       return;
     }
 
-    // 2. Smart step nudge (3pm if behind pace)
     if (hour === 15) {
       const expectedByNow = params.stepGoal * (hour / 24);
       if (params.stepsToday < expectedByNow * 0.5) {
         const behind = Math.round(expectedByNow - params.stepsToday);
         await this.sendImmediate(
-          '⚡ You\'re behind pace',
+          "⚡ You're behind pace",
           `${behind.toLocaleString()} steps behind for the day. A quick walk brings you back on track.`
         );
         return;
       }
     }
 
-    // 3. Hydration check (every ~2h if water goal not met, between 10am–8pm)
     if (hour >= 10 && hour <= 20 && (params.waterToday ?? 0) < (params.waterGoal ?? 8) * 0.5) {
       const glassesLeft = (params.waterGoal ?? 8) - (params.waterToday ?? 0);
       if (glassesLeft > 2) {
@@ -130,25 +122,20 @@ export class NotificationService {
       }
     }
 
-    // 4. Comeback nudge (after 48h of inactivity)
     if (params.lastActiveDate) {
       const daysSince = Math.floor(
         (Date.now() - new Date(params.lastActiveDate).getTime()) / (1000 * 60 * 60 * 24)
       );
       if (daysSince >= 2 && hour >= 9 && hour <= 20) {
         await this.sendImmediate(
-          '👋 It\'s been a while',
-          `${daysSince} days since your last activity. Even 10 minutes counts — let\'s go!`
+          "👋 It's been a while",
+          `${daysSince} days since your last activity. Even 10 minutes counts — let's go!`
         );
         return;
       }
     }
 
-    // 5. Goal almost reached (within 500 steps)
-    if (
-      params.stepsToday >= params.stepGoal - 500 &&
-      params.stepsToday < params.stepGoal
-    ) {
+    if (params.stepsToday >= params.stepGoal - 500 && params.stepsToday < params.stepGoal) {
       const left = params.stepGoal - params.stepsToday;
       await this.sendImmediate(
         '🎯 Almost there!',
@@ -158,7 +145,6 @@ export class NotificationService {
     }
   }
 
-  // ── Weekly Progress Report (Sunday 9am) ──────────────────────────────
   async scheduleWeeklyReport(params: {
     totalSteps: number;
     totalDistKm: number;
@@ -182,15 +168,14 @@ export class NotificationService {
         data: { type: 'weekly_report' },
       },
       trigger: {
-        weekday: 1, // Sunday (1 = Sunday in Expo)
+        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+        weekday: 1,
         hour: 9,
         minute: 0,
-        repeats: true,
-      } as any,
+      },
     });
   }
 
-  // ── Badge unlocked notification ─────────────────────────────────────────
   async notifyBadgeUnlocked(badgeLabel: string, badgeIcon: string): Promise<void> {
     await this.sendImmediate(
       `${badgeIcon} New Badge Unlocked!`,
@@ -198,7 +183,6 @@ export class NotificationService {
     );
   }
 
-  // ── Reminder settings ────────────────────────────────────────────────
   async getReminderSettings(): Promise<ReminderSettings | null> {
     try {
       const raw = await AsyncStorage.getItem(REMINDER_SETTINGS_KEY);
@@ -214,11 +198,11 @@ export class NotificationService {
       await Notifications.cancelAllScheduledNotificationsAsync();
 
       const reminders = [
-        { key: 'walking', title: '🚶 Time for a walk!',     body: 'Stay active — a 10-minute walk keeps the streak alive.' },
-        { key: 'workout', title: '💪 Workout time!',         body: 'Your session is scheduled. Ready to crush it?' },
-        { key: 'water',   title: '💧 Hydration check',       body: 'How\'s your water intake? Hit those 8 glasses!' },
-        { key: 'protein', title: '🥩 Protein reminder',      body: 'Don\'t miss your protein goal today.' },
-        { key: 'fiber',   title: '🌿 Fiber reminder',        body: 'Add some veggies or fruit to hit your fiber goal.' },
+        { key: 'walking', title: '🚶 Time for a walk!',  body: 'Stay active — a 10-minute walk keeps the streak alive.' },
+        { key: 'workout', title: '💪 Workout time!',      body: 'Your session is scheduled. Ready to crush it?' },
+        { key: 'water',   title: '💧 Hydration check',    body: "How's your water intake? Hit those 8 glasses!" },
+        { key: 'protein', title: '🥩 Protein reminder',   body: "Don't miss your protein goal today." },
+        { key: 'fiber',   title: '🌿 Fiber reminder',     body: 'Add some veggies or fruit to hit your fiber goal.' },
       ];
 
       for (const r of reminders) {
@@ -228,7 +212,11 @@ export class NotificationService {
         if (isNaN(hours) || isNaN(minutes)) continue;
         await Notifications.scheduleNotificationAsync({
           content: { title: r.title, body: r.body, data: { type: r.key } },
-          trigger: { hour: hours, minute: minutes, repeats: true } as any,
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DAILY,
+            hour: hours,
+            minute: minutes,
+          },
         });
       }
     } catch (e) { console.error('scheduleReminders error:', e); }

@@ -10,8 +10,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, Vibration, Platform, StatusBar, Animated,
+  TextInput, Alert, Vibration, Platform, StatusBar, Animated, AppState,
 } from 'react-native';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import * as Speech from 'expo-speech';
 import { useTheme } from '../../context/ThemeContext';
 import { databaseService } from '../../services/database';
@@ -190,6 +191,7 @@ const exStyles = StyleSheet.create({
 // ── Main Screen ───────────────────────────────────────────────────────────
 export default function ActiveWorkoutScreen({ route, navigation }: any) {
   const { workout } = route.params;
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const accent = colors.primary;
 
@@ -211,10 +213,33 @@ export default function ActiveWorkoutScreen({ route, navigation }: any) {
   const [restTimer, setRestTimer] = useState<{ exIdx: number } | null>(null);
   const [finished, setFinished] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const startTimeRef = useRef<number>(Date.now());
+  const bgTimeRef = useRef<number | null>(null);
+  const appStateRef = useRef(AppState.currentState);
 
+  // Wall-clock based timer — survives backgrounding
   useEffect(() => {
-    timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
-    return () => clearInterval(timerRef.current);
+    startTimeRef.current = Date.now();
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (appStateRef.current === 'active' && nextState.match(/inactive|background/)) {
+        bgTimeRef.current = Date.now();
+      } else if (nextState === 'active' && bgTimeRef.current !== null) {
+        // Compensate for time spent in background
+        const bgDuration = Date.now() - bgTimeRef.current;
+        startTimeRef.current -= bgDuration;
+        bgTimeRef.current = null;
+      }
+      appStateRef.current = nextState;
+    });
+
+    return () => {
+      clearInterval(timerRef.current);
+      sub.remove();
+    };
   }, []);
 
   const handleSetDone = useCallback((exIdx: number, setIdx: number) => {
@@ -275,7 +300,7 @@ export default function ActiveWorkoutScreen({ route, navigation }: any) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <StatusBar barStyle="light-content" />
-        <ScrollView contentContainerStyle={{ padding: 24, paddingTop: 60, gap: 20 }}>
+        <ScrollView contentContainerStyle={{ padding: 24, gap: 20 }}>
           <Text style={{ fontSize: 48, textAlign: 'center' }}>🏆</Text>
           <Text style={[styles.summaryTitle, { color: colors.text }]}>Workout Done!</Text>
           <Text style={[styles.summaryTime, { color: accent }]}>{formatTime(elapsed)}</Text>
@@ -306,7 +331,7 @@ export default function ActiveWorkoutScreen({ route, navigation }: any) {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <StatusBar barStyle="light-content" />
 
       {/* Sticky header */}
@@ -359,13 +384,13 @@ export default function ActiveWorkoutScreen({ route, navigation }: any) {
           </Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  stickyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingBottom: 12, borderBottomWidth: 1 },
+  stickyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, borderBottomWidth: 1 },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   timerBig: { fontSize: 28, fontWeight: '900', letterSpacing: -1 },
   workoutNameSmall: { fontSize: 11, fontWeight: '600', marginTop: 2 },

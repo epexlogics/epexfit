@@ -5,9 +5,8 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { borderRadius } from '../../constants/theme';
-
-const ACCENT = '#F5C842';
 
 export default function ForgotPasswordScreen({ navigation }: any) {
   const [email, setEmail] = useState('');
@@ -16,7 +15,9 @@ export default function ForgotPasswordScreen({ navigation }: any) {
   const [focused, setFocused] = useState(false);
 
   const { resetPassword } = useAuth();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const accent = colors.primary;
 
   const handleReset = async () => {
     if (!email.trim()) {
@@ -34,15 +35,16 @@ export default function ForgotPasswordScreen({ navigation }: any) {
   };
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
+      <ScrollView contentContainerStyle={[styles.scroll, { }]} showsVerticalScrollIndicator={false}>
 
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={[styles.backText, { color: ACCENT }]}>← Back</Text>
+          <Text style={[styles.backText, { color: accent }]}>← Back</Text>
         </TouchableOpacity>
 
         {sent ? (
@@ -53,10 +55,10 @@ export default function ForgotPasswordScreen({ navigation }: any) {
               We sent a password reset link to {email}
             </Text>
             <TouchableOpacity
-              style={[styles.primaryBtn, { backgroundColor: ACCENT }]}
+              style={[styles.primaryBtn, { backgroundColor: accent }]}
               onPress={() => navigation.navigate('Login')}
             >
-              <Text style={styles.primaryBtnText}>Back to Sign In</Text>
+              <Text style={[styles.primaryBtnText, { color: colors.onPrimary }]}>Back to Sign In</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -71,7 +73,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
 
             <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
               <Text style={[styles.label, { color: colors.textSecondary }]}>EMAIL ADDRESS</Text>
-              <View style={[styles.inputWrap, { borderColor: focused ? ACCENT : colors.border, backgroundColor: colors.surface }]}>
+              <View style={[styles.inputWrap, { borderColor: focused ? accent : colors.border, backgroundColor: colors.surface }]}>
                 <TextInput
                   style={[styles.input, { color: colors.text }]}
                   placeholder="you@example.com"
@@ -86,18 +88,23 @@ export default function ForgotPasswordScreen({ navigation }: any) {
               </View>
 
               <TouchableOpacity
-                style={[styles.primaryBtn, { backgroundColor: ACCENT }, loading && { opacity: 0.7 }]}
+                style={[styles.primaryBtn, { backgroundColor: accent }, loading && { opacity: 0.7 }]}
                 onPress={handleReset}
                 disabled={loading}
                 activeOpacity={0.85}
               >
-                {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.primaryBtnText}>Send Reset Link</Text>}
+                {loading ? (
+                  <ActivityIndicator color={colors.onPrimary} />
+                ) : (
+                  <Text style={[styles.primaryBtnText, { color: colors.onPrimary }]}>Send Reset Link</Text>
+                )}
               </TouchableOpacity>
             </View>
           </>
         )}
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView> 
   );
 }
 
@@ -114,7 +121,7 @@ const styles = StyleSheet.create({
   inputWrap: { borderWidth: 1.5, borderRadius: borderRadius.lg, paddingHorizontal: 16, height: 52 },
   input: { flex: 1, fontSize: 15, fontWeight: '500', height: '100%' },
   primaryBtn: { height: 54, borderRadius: borderRadius.full, alignItems: 'center', justifyContent: 'center' },
-  primaryBtnText: { fontSize: 15, fontWeight: '900', color: '#000', letterSpacing: 0.4 },
+  primaryBtnText: { fontSize: 15, fontWeight: '900', letterSpacing: 0.4 },
   sentWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80, gap: 16 },
   sentTitle: { fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
   sentSub: { fontSize: 14, textAlign: 'center', maxWidth: 260, lineHeight: 20, fontWeight: '500' },

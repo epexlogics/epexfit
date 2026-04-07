@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Image,
   Alert, ActivityIndicator, ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
 import { useAuth } from '../../context/AuthContext';
@@ -12,7 +13,7 @@ import { databaseService } from '../../services/database';
 import AppIcon from '../../components/AppIcon';
 import { borderRadius } from '../../constants/theme';
 import { captureRef } from 'react-native-view-shot';
-import moment from 'moment';
+import dayjs from '../../utils/dayjs';
 
 function formatDuration(seconds: number): string {
   const hrs = Math.floor(seconds / 3600);
@@ -21,6 +22,7 @@ function formatDuration(seconds: number): string {
 }
 
 export default function PhotoLogScreen({ route, navigation }: any) {
+  const insets = useSafeAreaInsets();
   const { activity } = route.params ?? {};
   const { user } = useAuth();
   const { colors } = useTheme();
@@ -123,7 +125,7 @@ export default function PhotoLogScreen({ route, navigation }: any) {
   // Photo preview
   if (photo) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
         <View ref={previewRef} collapsable={false} style={{ flex: 1 }}>
           <Image source={{ uri: photo }} style={styles.previewImg} />
           <View style={[styles.statsOverlay, { backgroundColor: 'rgba(0,0,0,0.82)' }]}>
@@ -133,7 +135,7 @@ export default function PhotoLogScreen({ route, navigation }: any) {
               { icon: 'map-marker-distance', text: `${activity.distance.toFixed(2)} km` },
               { icon: 'fire', text: `${activity.calories} calories` },
               { icon: 'timer', text: formatDuration(activity.duration) },
-              { icon: 'calendar', text: moment(activity.startTime).format('MMM DD, YYYY') },
+              { icon: 'calendar', text: dayjs(activity.startTime).format('MMM DD, YYYY') },
             ].map((item) => (
               <View key={item.text} style={styles.overlayRow}>
                 <AppIcon name={item.icon} size={20} color={colors.primary} />
@@ -155,13 +157,13 @@ export default function PhotoLogScreen({ route, navigation }: any) {
             }
           </TouchableOpacity>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   // Camera view
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <CameraView ref={cameraRef} style={styles.camera} facing={facing} onCameraReady={() => setCameraReady(true)}>
         <View style={styles.cameraControls}>
           <TouchableOpacity
@@ -199,7 +201,7 @@ export default function PhotoLogScreen({ route, navigation }: any) {
           ))}
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

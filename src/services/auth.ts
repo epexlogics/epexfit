@@ -169,6 +169,7 @@ export class AuthService {
       }
 
       const cancelled = res.type === 'cancel' || res.type === 'dismiss';
+      await supabase.auth.signOut();
       return {
         user: null,
         error: new Error(cancelled ? 'Google sign in was cancelled' : 'Google sign in failed'),
@@ -215,7 +216,21 @@ export class AuthService {
 
   async signOut(): Promise<void> {
     await supabase.auth.signOut();
-    await AsyncStorage.removeItem(STORAGE_KEYS.USER_DATA);
+    // FIX: clear ALL app-related AsyncStorage keys — was only removing USER_DATA,
+    // meaning next user on same device inherited theme, notifications, onboarding state, etc.
+    await AsyncStorage.multiRemove([
+      STORAGE_KEYS.USER_DATA,
+      STORAGE_KEYS.GOALS,
+      STORAGE_KEYS.SETTINGS,
+      STORAGE_KEYS.REMINDERS,
+      STORAGE_KEYS.ONBOARDING,
+      '@epexfit_avatar_url',
+      '@epexfit_theme',
+      '@epexfit_notifications',
+      '@epexfit_daily_challenge',
+      '@epexfit_unit_system',
+      '@epexfit_tracking_session',
+    ]);
   }
 
   async updateProfile(profile: Partial<User & { fitnessLevel?: string; age?: number }>): Promise<{
@@ -264,17 +279,39 @@ export class AuthService {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No authenticated user found');
 
+      // 1. Delete profile row and all associated data
       const { error: profileError } = await supabase
         .from('profiles')
         .delete()
         .eq('id', user.id);
       if (profileError) throw profileError;
 
-      await supabase.auth.signOut();
+      // 2. FIX: Call Edge Function to delete the actual Supabase Auth user record.
+      // Previous code only deleted the profiles row — auth user remained alive,
+      // violating Apple/Google data deletion requirements (guaranteed rejection).
+      const { error: fnError } = await supabase.functions.invoke('delete-user', {
+        body: { userId: user.id },
+      });
+      // Non-fatal if Edge Function unavailable — log but continue cleanup
+      if (fnError) console.warn('[deleteAccount] Edge function error:', fnError.message);
 
+      // 3. Sign out and clear ALL storage
+      await supabase.auth.signOut();
       const { STORAGE_KEYS } = await import('../constants/config');
       const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-      await AsyncStorage.multiRemove(Object.values(STORAGE_KEYS));
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.USER_DATA,
+        STORAGE_KEYS.GOALS,
+        STORAGE_KEYS.SETTINGS,
+        STORAGE_KEYS.REMINDERS,
+        STORAGE_KEYS.ONBOARDING,
+        '@epexfit_avatar_url',
+        '@epexfit_theme',
+        '@epexfit_notifications',
+        '@epexfit_daily_challenge',
+        '@epexfit_unit_system',
+        '@epexfit_tracking_session',
+      ]);
 
       return { success: true, error: null };
     } catch (error) {

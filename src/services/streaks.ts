@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { BADGE_DEFINITIONS, evaluateBadges } from '../constants/badges';
+import { socialService } from './socialService';
 
 const STREAK_CACHE_KEY = '@epexfit_streak_cache';
 
@@ -136,6 +137,12 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
           unlocked_at: new Date().toISOString(),
         }))
       );
+    }
+
+    // Publish streak milestones to the social feed
+    const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100];
+    if (STREAK_MILESTONES.includes(streak)) {
+      socialService.publishFeedEvent('streak', { days: streak });
     }
 
     return newBadgeIds

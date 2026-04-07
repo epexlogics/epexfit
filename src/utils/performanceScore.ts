@@ -1,3 +1,8 @@
+/**
+ * Athlete Performance Score (APS) — v3
+ * Uses actual user profile data for macro targets (no more hardcoded 120g protein).
+ * Scores: Consistency · Activity · Nutrition · Recovery · Progress
+ */
 export interface APSInput {
   plannedWorkouts: number;
   completedWorkouts: number;
@@ -5,77 +10,72 @@ export interface APSInput {
   stepsToday: number;
   calGoal: number;
   calBurned: number;
-  proteinGoal: number;
+  proteinGoal: number;   // from user profile (weight × 1.6 for athletes)
   proteinActual: number;
-  waterGoal: number;
+  waterGoal: number;     // from user profile
   waterActual: number;
   sleepHours: number;
-  mood: number; // 1-5
-  weekPace?: number; // min/km
+  mood: number;
+  weekPace?: number;
   prevWeekPace?: number;
+  bodyWeightKg?: number; // for personalised goals
 }
 
 export interface APSResult {
   total: number;
-  breakdown: {
-    consistency: number;
-    activity: number;
-    nutrition: number;
-    recovery: number;
-    progress: number;
-  };
+  breakdown: { consistency: number; activity: number; nutrition: number; recovery: number; progress: number };
   label: string;
   color: string;
+  tip: string;
+}
+
+/** Derive personalised daily protein goal: 1.6–2g per kg body weight */
+export function calcProteinGoal(weightKg: number, level: 'beginner'|'intermediate'|'advanced' = 'intermediate'): number {
+  const multiplier = level === 'advanced' ? 2.0 : level === 'intermediate' ? 1.8 : 1.6;
+  return Math.round(weightKg * multiplier);
+}
+
+/** Derive daily calorie burn goal from activity level */
+export function calcCalorieBurnGoal(level: 'beginner'|'intermediate'|'advanced'): number {
+  return level === 'advanced' ? 700 : level === 'intermediate' ? 500 : 350;
 }
 
 export function calculateAPS(input: APSInput): APSResult {
   const pct = (v: number, g: number) => (g > 0 ? Math.min(v / g, 1) : 0);
 
-  const consistency =
-    input.plannedWorkouts > 0
-      ? pct(input.completedWorkouts, input.plannedWorkouts) * 100
-      : 60; // neutral if no plan
+  const consistency = input.plannedWorkouts > 0
+    ? pct(input.completedWorkouts, input.plannedWorkouts) * 100
+    : 60;
 
-  const activity =
-    (pct(input.stepsToday, input.stepGoal) * 0.5 +
-      pct(input.calBurned, input.calGoal) * 0.5) *
-    100;
+  const activity = (pct(input.stepsToday, input.stepGoal) * 0.5 + pct(input.calBurned, input.calGoal) * 0.5) * 100;
 
-  const nutrition =
-    (pct(input.proteinActual, input.proteinGoal) * 0.6 +
-      pct(input.waterActual, input.waterGoal) * 0.4) *
-    100;
+  const nutrition = (pct(input.proteinActual, input.proteinGoal) * 0.6 + pct(input.waterActual, input.waterGoal) * 0.4) * 100;
 
-  const recovery =
-    (Math.min(input.sleepHours / 8, 1) * 0.7 + (input.mood / 5) * 0.3) * 100;
+  const recovery = (Math.min(input.sleepHours / 8, 1) * 0.7 + (input.mood / 5) * 0.3) * 100;
 
-  const progress =
-    input.weekPace && input.prevWeekPace && input.prevWeekPace > 0
-      ? Math.min(
-          ((input.prevWeekPace - input.weekPace) / input.prevWeekPace) * 500,
-          100
-        )
-      : 50;
+  const progress = input.weekPace && input.prevWeekPace && input.prevWeekPace > 0
+    ? Math.min(((input.prevWeekPace - input.weekPace) / input.prevWeekPace) * 500, 100)
+    : 0; // New users get 0 — no data means no progress score yet, not a free 50
 
   const total = Math.round(
-    consistency * 0.3 +
-      activity * 0.25 +
-      nutrition * 0.2 +
-      recovery * 0.15 +
-      progress * 0.1
+    consistency * 0.30 + activity * 0.25 + nutrition * 0.20 + recovery * 0.15 + progress * 0.10
   );
 
-  let label = 'Building';
-  let color = '#FF5B5B';
-  if (total >= 90) { label = 'Elite 🏆'; color = '#00F5C4'; }
-  else if (total >= 75) { label = 'Strong 💪'; color = '#F5C842'; }
-  else if (total >= 55) { label = 'Active 🏃'; color = '#4D9FFF'; }
+  // Specific actionable tip
+  let tip = 'Log your first full day to get your personal APS.';
+  if (input.stepsToday < input.stepGoal * 0.5) tip = "You're less than halfway to your step goal — a 20-min walk closes the gap.";
+  else if (input.waterActual < input.waterGoal * 0.6) tip = 'Hydration is behind — drink 2 glasses now.';
+  else if (input.proteinActual < input.proteinGoal * 0.5) tip = 'Protein is low — add a high-protein meal or shake.';
+  else if (input.sleepHours < 6) tip = 'Under 6h sleep detected — prioritise rest tonight.';
+  else if (total >= 80) tip = 'Outstanding day! Keep the momentum going.';
+  else if (total >= 60) tip = 'Solid effort — one more win today pushes you to Strong.';
+
+  /* Tier colors align with AppThemeColors aps* (midnight / cyan system) */
+  let label = 'Building', color = '#FB7185';
+  if (total >= 90) { label = 'Elite 🏆'; color = '#4ADE80'; }
+  else if (total >= 75) { label = 'Strong 💪'; color = '#22D3EE'; }
+  else if (total >= 55) { label = 'Active 🏃'; color = '#38BDF8'; }
   else if (total >= 40) { label = 'Building 📈'; color = '#C084FC'; }
 
-  return {
-    total,
-    breakdown: { consistency, activity, nutrition, recovery, progress },
-    label,
-    color,
-  };
+  return { total, breakdown: { consistency, activity, nutrition, recovery, progress }, label, color, tip };
 }

@@ -14,6 +14,7 @@ interface AuthContextType {
   updateProfile: (data: Partial<User>) => Promise<{ success: boolean; error: any }>;
   deleteAccount: () => Promise<{ success: boolean; error: any }>;
   resendConfirmationEmail: (email: string) => Promise<{ success: boolean; error: any }>;
+  resetPassword: (email: string) => Promise<{ success: boolean; error: any }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -135,6 +136,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const resetPassword = async (email: string) => {
+  try {
+    const { success, error: resetError } = await authService.resetPassword(email);
+    if (resetError) throw resetError;
+    return { success: true, error: null };
+  } catch (err: any) {
+    return { success: false, error: err };
+  }
+};
+
   const resendConfirmationEmail = async (email: string) => {
     try {
       const { error: resendError } = await supabase.auth.resend({
@@ -150,7 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, error, signUp, signIn, signInWithGoogle, signOut, updateProfile, deleteAccount, resendConfirmationEmail }}
+     value={{ user, isLoading, error, signUp, signIn, signInWithGoogle, signOut, updateProfile, deleteAccount, resendConfirmationEmail, resetPassword }}
     >
       {children}
     </AuthContext.Provider>

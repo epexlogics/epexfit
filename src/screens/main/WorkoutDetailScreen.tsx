@@ -1,15 +1,12 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity, Platform } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
 import { databaseService } from '../../services/database';
 import AppIcon from '../../components/AppIcon';
-import { borderRadius, spacing } from '../../constants/theme';
-import moment from 'moment';
+import { borderRadius, spacing, WORKOUT_TYPE_COLORS } from '../../constants/theme';
+import dayjs from '../../utils/dayjs';
 
-const TYPE_COLORS: Record<string, string> = {
-  Cardio: '#FF5722', Strength: '#2196F3', Yoga: '#9C27B0',
-  HIIT: '#F44336', Stretching: '#4CAF50', Other: '#607D8B',
-};
 const TYPE_ICONS: Record<string, string> = {
   Cardio: 'run', Strength: 'dumbbell', Yoga: 'leaf',
   HIIT: 'fire', Stretching: 'human-male-height', Other: 'fitness',
@@ -21,10 +18,11 @@ function formatDuration(seconds: number) {
 }
 
 export default function WorkoutDetailScreen({ route, navigation }: any) {
+  const insets = useSafeAreaInsets();
   const { workout } = route.params;
   const { colors } = useTheme();
   const [saving, setSaving] = useState(false);
-  const typeColor = TYPE_COLORS[workout.type] ?? colors.primary;
+  const typeColor = WORKOUT_TYPE_COLORS[workout.type] ?? colors.primary;
   const accent = colors.primary;
 
   const handleDelete = () => {
@@ -35,9 +33,10 @@ export default function WorkoutDetailScreen({ route, navigation }: any) {
   };
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 40 }}>
       {/* Back button */}
-      <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backBtn, { paddingTop: Platform.OS === 'ios' ? 56 : 40 }]}>
+      <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backBtn, { paddingTop: insets.top + 16 }]}>
         <AppIcon name="chevron-left" size={22} color={colors.text} />
         <Text style={[styles.backText, { color: colors.text }]}>Workouts</Text>
       </TouchableOpacity>
@@ -52,8 +51,8 @@ export default function WorkoutDetailScreen({ route, navigation }: any) {
           <Text style={[styles.typeBadgeText, { color: typeColor }]}>{workout.type}</Text>
         </View>
         {workout.completed && (
-          <View style={[styles.completedTag, { backgroundColor: '#4CAF5020', borderColor: '#4CAF5040' }]}>
-            <Text style={{ color: '#4CAF50', fontWeight: '700', fontSize: 13 }}>✓ Completed</Text>
+          <View style={[styles.completedTag, { backgroundColor: colors.success + '22', borderColor: colors.success + '50' }]}>
+            <Text style={{ color: colors.success, fontWeight: '700', fontSize: 13 }}>✓ Completed</Text>
           </View>
         )}
         <View style={[styles.statsRow, { borderTopColor: colors.divider }]}>
@@ -61,7 +60,7 @@ export default function WorkoutDetailScreen({ route, navigation }: any) {
             { icon: 'timer', val: formatDuration(workout.duration), lbl: 'Duration' },
             { icon: 'fire', val: `${workout.calories}`, lbl: 'Est. Kcal' },
             { icon: 'dumbbell', val: `${workout.exercises.length}`, lbl: 'Exercises' },
-            { icon: 'calendar', val: moment(workout.scheduledDate).format('MMM D'), lbl: 'Scheduled' },
+            { icon: 'calendar', val: dayjs(workout.scheduledDate).format('MMM D'), lbl: 'Scheduled' },
           ].map((s) => (
             <View key={s.lbl} style={styles.statItem}>
               <AppIcon name={s.icon} size={18} color={typeColor} />
@@ -79,8 +78,8 @@ export default function WorkoutDetailScreen({ route, navigation }: any) {
           onPress={() => navigation.navigate('ActiveWorkout', { workout })}
           activeOpacity={0.88}
         >
-          <AppIcon name="play" size={22} color="#000" />
-          <Text style={styles.startBtnText}>Start Workout</Text>
+          <AppIcon name="play" size={22} color={colors.onPrimary} />
+          <Text style={[styles.startBtnText, { color: colors.onPrimary }]}>Start Workout</Text>
         </TouchableOpacity>
       )}
 
@@ -132,6 +131,7 @@ export default function WorkoutDetailScreen({ route, navigation }: any) {
         <Text style={[styles.deleteBtnText, { color: colors.error }]}>Delete Workout</Text>
       </TouchableOpacity>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 16, fontWeight: '800' },
   statLabel: { fontSize: 10, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8 },
   startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 999, marginHorizontal: 16, marginBottom: 8, gap: 10 },
-  startBtnText: { color: '#000', fontWeight: '900', fontSize: 17, letterSpacing: 0.3 },
+  startBtnText: { fontWeight: '900', fontSize: 17, letterSpacing: 0.3 },
   card: { margin: 16, marginTop: 0, marginBottom: 8, borderRadius: borderRadius.xl, borderWidth: 1, padding: 16 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontSize: 18, fontWeight: '700' },
@@ -166,4 +166,5 @@ const styles = StyleSheet.create({
   notesText: { fontSize: 14, lineHeight: 22 },
   deleteBtn: { marginHorizontal: 16, marginTop: 4, marginBottom: 8, height: 48, borderRadius: borderRadius.xl, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   deleteBtnText: { fontSize: 14, fontWeight: '700' },
-});
+}
+  );
