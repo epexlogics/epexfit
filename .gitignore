@@ -17,4 +17,4 @@ node_modules/
 *.log
 
 # npm
-package-lock.json
+package-lock.json".vscode/" 
