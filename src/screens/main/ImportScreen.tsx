@@ -22,13 +22,14 @@ import { useTheme } from '../../context/ThemeContext';
 import { useToast } from '../../contexts/ToastContext';
 import AppIcon from '../../components/AppIcon';
 import { importFromStrava, parseTcxActivity, importFromHealthPlatform } from '../../services/importService';
+import { supabase } from '../../services/supabase';
 import { borderRadius, spacing } from '../../constants/theme';
 import { openAuthSessionAsync } from 'expo-web-browser';
 
 const STRAVA_CLIENT_ID = process.env.EXPO_PUBLIC_STRAVA_CLIENT_ID ?? '';
-const STRAVA_CLIENT_SECRET = process.env.EXPO_PUBLIC_STRAVA_CLIENT_SECRET ?? '';
 const STRAVA_AUTH_URL = 'https://www.strava.com/oauth/mobile/authorize';
-const STRAVA_TOKEN_URL = 'https://www.strava.com/oauth/token';
+// Token exchange happens server-side via Supabase Edge Function (strava-exchange)
+// so the client_secret is never exposed in the app bundle.
 
 function ImportCard({
   icon,
@@ -142,16 +143,20 @@ const result = await openAuthSessionAsync(authUrl, redirectUri);
 
   if (result.type === 'success' && result.url) {
     const code = new URL(result.url).searchParams.get('code');
-    const tokenRes = await fetch(STRAVA_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_id: STRAVA_CLIENT_ID,
-        client_secret: STRAVA_CLIENT_SECRET,
-        code: code,
-        grant_type: 'authorization_code',
-      }),
-    });
+    // Call Supabase Edge Function — secret stays server-side
+    const { data: { session } } = await supabase.auth.getSession();
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+    const tokenRes = await fetch(
+      `${supabaseUrl}/functions/v1/strava-exchange`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ code, client_id: STRAVA_CLIENT_ID }),
+      },
+    );
         if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
         const tokenJson = await tokenRes.json() as { access_token: string };
         const summary = await importFromStrava(tokenJson.access_token);

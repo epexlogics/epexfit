@@ -1,15 +1,16 @@
 // Credentials are loaded from environment variables.
 // Copy .env.example to .env and fill in your Supabase values.
 // For EAS builds, set these in eas.json under "env" or use EAS Secrets.
-import Constants from 'expo-constants';
-
-const extra = Constants.expoConfig?.extra ?? {};
+//
+// NOTE: process.env.EXPO_PUBLIC_* works in BOTH expo start (dev) AND EAS builds.
+// The previous Constants.expoConfig?.extra approach only worked in EAS builds —
+// in expo start the extra object was empty, causing silent auth failures.
 
 export const SUPABASE_URL: string =
-  (extra.supabaseUrl as string) || '';
+  process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 
 export const SUPABASE_ANON_KEY: string =
-  (extra.supabaseAnonKey as string) || '';
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 export const APP_CONFIG = {
   appName: 'EpexFit',
