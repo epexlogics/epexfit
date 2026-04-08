@@ -72,6 +72,7 @@
 
     "android": {
       "package": "com.epexlogics.epexfit",
+      "minSdkVersion": 26,
       "adaptiveIcon": {
         "foregroundImage": "./src/assets/adaptive-icon.png",
         "backgroundColor": "#000000"
