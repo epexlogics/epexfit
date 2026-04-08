@@ -83,7 +83,7 @@ export default function SplashScreen() {
       <Animated.View
         style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}
       >
-        <Image source={require('../../assets/logo.png')} style={{ width: 76, height: 76, resizeMode: 'contain' }} />
+        <Image source={require('../assets/logo.png')} style={{ width: 76, height: 76, resizeMode: 'contain' }} />
 
         <Text style={[styles.brand, { color: colors.text }]}>EPEXFIT</Text>
         <Animated.Text style={[styles.tagline, { opacity: taglineFade, color: colors.textSecondary }]}>
