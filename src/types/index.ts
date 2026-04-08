@@ -38,6 +38,7 @@ export interface Activity {
   photoUrl?: string;
   photoOverlayUrl?: string;
   notes?: string;
+  avgHeartRate?: number;
   createdAt: Date;
 }
 

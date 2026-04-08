@@ -1,13 +1,19 @@
 /**
- * SocialFeedScreen — Real activity feed from Supabase
+ * SocialFeedScreen — Real-time social feed
  *
- * Fixes:
- * - Uses corrected socialService.getFeed() which properly checks liked-by-me
- * - Optimistic like toggle updates count correctly
- * - Navigate to UserProfile on avatar/name tap
- * - Empty state with Find People CTA
+ * ✅ Real Supabase data (activity_feed table)
+ * ✅ Optimistic like toggle + DB write
+ * ✅ Real-time: new posts, likes, comments via Supabase Realtime
+ * ✅ Counts update live without manual refresh
+ * ✅ Zero mock data
+ *
+ * FIX APPLIED: Added Supabase Realtime channels for:
+ *   - activity_feed INSERT  → auto-reload feed
+ *   - feed_likes INSERT/DELETE → live likeCount delta
+ *   - feed_comments INSERT/DELETE → live commentCount delta
+ * Channels cleaned up on screen blur via useFocusEffect return.
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Image, RefreshControl, ActivityIndicator,
@@ -16,14 +22,18 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
 import { socialService, FeedItem } from '../../services/socialService';
+import { supabase } from '../../services/supabase';
 import { borderRadius, spacing } from '../../constants/theme';
 import dayjs from '../../utils/dayjs';
 
 const FEED_TYPE_META: Record<string, { emoji: string; label: string; color: string }> = {
-  activity_completed: { emoji: '🏃', label: 'completed a workout',   color: '#4D9FFF' },
-  goal_achieved:      { emoji: '🎯', label: 'crushed a goal',        color: '#00C853' },
-  streak:             { emoji: '🔥', label: 'hit a streak milestone', color: '#FF9500' },
-  weight_logged:      { emoji: '⚖️', label: 'logged weight',         color: '#C084FC' },
+  activity_completed: { emoji: '🏃', label: 'completed a workout',    color: '#4D9FFF' },
+  goal_achieved:      { emoji: '🎯', label: 'crushed a goal',         color: '#00C853' },
+  streak:             { emoji: '🔥', label: 'hit a streak milestone',  color: '#FF9500' },
+  weight_logged:      { emoji: '⚖️', label: 'logged weight',          color: '#C084FC' },
+  nutrition_logged:   { emoji: '🥗', label: 'hit their nutrition goal', color: '#4ADE80' },
+  steps_goal:         { emoji: '👟', label: 'crushed their step goal', color: '#38BDF8' },
+  badge_earned:       { emoji: '🏅', label: 'earned a badge',         color: '#FBBF24' },
 };
 
 function FeedCard({
@@ -160,6 +170,7 @@ export default function SocialFeedScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [fromCache, setFromCache] = useState(false);
+  const channelsRef = useRef<ReturnType<typeof supabase.channel>[]>([]);
 
   const loadFeed = useCallback(async () => {
     const { items: feed, fromCache: cached } = await socialService.getFeed(40);
@@ -169,16 +180,87 @@ export default function SocialFeedScreen() {
     setRefreshing(false);
   }, []);
 
+  // ── Real-time channels ────────────────────────────────────────────────────
+  const setupRealtime = useCallback(() => {
+    channelsRef.current.forEach(ch => ch.unsubscribe());
+    channelsRef.current = [];
+
+    // New posts → reload full feed (need actor profile data)
+    const feedCh = supabase
+      .channel('rt_feed_posts')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'activity_feed' },
+        () => loadFeed(),
+      )
+      .subscribe();
+
+    // Like INSERT/DELETE → delta update likeCount
+    const likesCh = supabase
+      .channel('rt_feed_likes')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'feed_likes' },
+        (payload) => {
+          const feedItemId = (payload.new as any)?.feed_item_id;
+          if (!feedItemId) return;
+          setItems(prev => prev.map(i =>
+            i.id === feedItemId ? { ...i, likeCount: i.likeCount + 1 } : i,
+          ));
+        },
+      )
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'feed_likes' },
+        (payload) => {
+          const feedItemId = (payload.old as any)?.feed_item_id;
+          if (!feedItemId) return;
+          setItems(prev => prev.map(i =>
+            i.id === feedItemId ? { ...i, likeCount: Math.max(0, i.likeCount - 1) } : i,
+          ));
+        },
+      )
+      .subscribe();
+
+    // Comment INSERT/DELETE → delta update commentCount
+    const commentsCh = supabase
+      .channel('rt_feed_comments')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'feed_comments' },
+        (payload) => {
+          const feedItemId = (payload.new as any)?.feed_item_id;
+          if (!feedItemId) return;
+          setItems(prev => prev.map(i =>
+            i.id === feedItemId ? { ...i, commentCount: i.commentCount + 1 } : i,
+          ));
+        },
+      )
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'feed_comments' },
+        (payload) => {
+          const feedItemId = (payload.old as any)?.feed_item_id;
+          if (!feedItemId) return;
+          setItems(prev => prev.map(i =>
+            i.id === feedItemId ? { ...i, commentCount: Math.max(0, i.commentCount - 1) } : i,
+          ));
+        },
+      )
+      .subscribe();
+
+    channelsRef.current = [feedCh, likesCh, commentsCh];
+  }, [loadFeed]);
+
   useFocusEffect(useCallback(() => {
     setLoading(true);
-    loadFeed();
-  }, [loadFeed]));
+    loadFeed().then(setupRealtime);
+    return () => {
+      channelsRef.current.forEach(ch => ch.unsubscribe());
+      channelsRef.current = [];
+    };
+  }, [loadFeed, setupRealtime]));
 
   const handleLike = async (id: string, liked: boolean) => {
-    // Optimistic update
+    // Optimistic update first
     setItems(prev => prev.map(i =>
       i.id === id
-        ? { ...i, liked: !liked, likeCount: liked ? i.likeCount - 1 : i.likeCount + 1 }
+        ? { ...i, liked: !liked, likeCount: liked ? Math.max(0, i.likeCount - 1) : i.likeCount + 1 }
         : i,
     ));
     await socialService.toggleLike(id, liked);
@@ -194,7 +276,6 @@ export default function SocialFeedScreen() {
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Header */}
       <View style={s.header}>
         <View>
           <Text style={[s.title, { color: colors.text }]}>Community</Text>

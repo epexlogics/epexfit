@@ -17,8 +17,12 @@ import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context'
 import AppIcon from '../../components/AppIcon';
 import { borderRadius, spacing } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import { useTracking } from '../../context/TrackingContext';
+import { supabase } from '../../services/supabase';
+import dayjs from 'dayjs';
 import { formatPace, calculateSplits } from '../../utils/paceUtils';
+import { useUnitSystem, type UnitSystem } from '../../utils/units';
 import { TAB_BAR_HEIGHT } from '../../constants/layout';
 
 const { width } = Dimensions.get('window');
@@ -70,6 +74,7 @@ function HealthSyncWidget({ colors, accent, onStepsSynced }: { colors: any; acce
   const [syncResult, setSyncResult] = useState<HealthSyncResult | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const platformName = Platform.OS === 'ios' ? 'Apple Health' : 'Google Fit';
 
   const doSync = useCallback(async () => {
@@ -77,6 +82,7 @@ function HealthSyncWidget({ colors, accent, onStepsSynced }: { colors: any; acce
     const result = await healthService.getTodaySteps();
     setSyncResult(result);
     setSyncing(false);
+    setLastSyncedAt(new Date());
     if (result.steps > 0) onStepsSynced?.(result.steps);
   }, [onStepsSynced]);
 
@@ -100,12 +106,13 @@ function HealthSyncWidget({ colors, accent, onStepsSynced }: { colors: any; acce
         </Text>
         {syncResult && syncResult.steps > 0 ? (
           <Text style={[bS.sub, { color: colors.textSecondary }]}>
-            Today: <Text style={{ fontWeight: '800', color: statusColor }}>{syncResult.steps.toLocaleString()}</Text> steps synced
+            Today: <Text style={{ fontWeight: '800', color: statusColor }}>{syncResult.steps.toLocaleString()}</Text> steps
+            {lastSyncedAt ? <Text style={{ color: colors.textDisabled }}> · synced {lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text> : null}
           </Text>
         ) : (
           <Text style={[bS.sub, { color: colors.textSecondary }]}>
-            {isConnected
-              ? 'Syncing steps, HR & sleep from your wearable'
+            {syncing ? 'Syncing…' : isConnected
+              ? 'Tap SYNC to fetch today\'s steps'
               : 'Grant motion permissions to auto-sync steps'}
           </Text>
         )}
@@ -147,7 +154,7 @@ const sC = StyleSheet.create({
   lbl: { fontSize: 9, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8 },
 });
 
-function SplitsTable({ splits, color, colors }: any) {
+function SplitsTable({ splits, color, colors, unitSystem }: { splits: any[]; color: string; colors: any; unitSystem: UnitSystem }) {
   if (!splits.length) return null;
   const fastest = Math.min(...splits.map((s: any) => s.seconds));
   return (
@@ -155,7 +162,7 @@ function SplitsTable({ splits, color, colors }: any) {
       <Text style={[spS.title, { color: colors.textSecondary }]}>KM SPLITS</Text>
       {splits.map((s: any) => (
         <View key={s.km} style={[spS.row, { borderBottomColor: colors.divider }]}>
-          <Text style={[spS.km, { color: colors.textSecondary }]}>KM {s.km}</Text>
+          <Text style={[spS.km, { color: colors.textSecondary }]}>{unitSystem === 'imperial' ? 'MI' : 'KM'} {s.km}</Text>
           <View style={{ flex: 1, paddingHorizontal: 8 }}>
             <View style={[spS.bar, { backgroundColor: colors.border }]}>
               <View style={[spS.fill, { backgroundColor: color, width: `${Math.min((fastest / s.seconds) * 100, 100)}%` }]} />
@@ -181,6 +188,8 @@ const spS = StyleSheet.create({
 export default function ActivityScreen() {
   const { isTracking, steps, distance, calories, duration, locationPoints, startTracking, stopTracking, currentActivity } = useTracking();
   const { colors, isDark } = useTheme();
+  const { user } = useAuth();
+  const unitSystem = useUnitSystem();
   const nav = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const [actType, setActType] = useState<ActivityKey>('walking');
@@ -215,7 +224,7 @@ export default function ActivityScreen() {
   };
   const doStop = () => Alert.alert('Complete', 'Save this activity?', [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Save', onPress: async () => { setLoading(true); const a = await stopTracking(); setLoading(false); if (a) nav.navigate('PhotoLog', { activity: a }); } },
+    { text: 'Save', onPress: async () => { setLoading(true); const a = await stopTracking({ avgHr: currentBpm > 0 ? currentBpm : undefined }); setLoading(false); if (a) nav.navigate('PhotoLog', { activity: a }); } },
     { text: 'Discard', style: 'destructive', onPress: async () => { setLoading(true); await stopTracking(); setLoading(false); } },
   ]);
 
@@ -251,7 +260,19 @@ export default function ActivityScreen() {
       >
         <Text style={[s.title, { color: colors.text }]}>Activity</Text>
 
-        {!isTracking && <HealthSyncWidget colors={colors} accent={color} />}
+        {!isTracking && (
+          <HealthSyncWidget
+            colors={colors}
+            accent={color}
+            onStepsSynced={async (steps) => {
+              if (!user) return;
+              const today = dayjs().format('YYYY-MM-DD');
+              await supabase
+                .from('daily_logs')
+                .upsert({ user_id: user.id, date: today, steps }, { onConflict: 'user_id,date' });
+            }}
+          />
+        )}
 
         {!isTracking && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
@@ -276,27 +297,54 @@ export default function ActivityScreen() {
               <WebView
                 style={s.map}
                 originWhitelist={['*']}
+                javaScriptEnabled
+                scrollEnabled={false}
+                startInLoadingState
+                renderLoading={() => (
+                  <View style={[s.map, { position: 'absolute', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f172a' }]}>
+                    <Text style={{ color: '#94a3b8', fontSize: 13 }}>Loading map…</Text>
+                  </View>
+                )}
+                renderError={() => (
+                  <View style={[s.map, { position: 'absolute', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f172a', gap: 6 }]}>
+                    <Text style={{ fontSize: 28 }}>🗺</Text>
+                    <Text style={{ color: '#94a3b8', fontSize: 13 }}>Map unavailable offline</Text>
+                    <Text style={{ color: '#475569', fontSize: 11 }}>{locationPoints.length} GPS pts recorded</Text>
+                  </View>
+                )}
                 source={{ html: `<!DOCTYPE html><html><head>
                   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
                   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
                   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-                  <style>html,body,#map{margin:0;padding:0;width:100%;height:100%;}}</style>
+                  <style>
+                    html,body,#map{margin:0;padding:0;width:100%;height:100%;}
+                    #loader{position:fixed;top:0;left:0;right:0;bottom:0;background:#0f172a;display:flex;align-items:center;justify-content:center;font-family:sans-serif;color:#94a3b8;font-size:13px;}
+                  </style>
                 </head><body>
+                  <div id="loader">Loading map…</div>
                   <div id="map"></div>
                   <script>
                     var pts = ${JSON.stringify(locationPoints.map(p => [p.latitude, p.longitude]))};
-                    var map = L.map('map', { zoomControl: false, attributionControl: false });
-                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-                    if (pts.length > 0) {
-                      var poly = L.polyline(pts, { color: '${color}', weight: 4 }).addTo(map);
-                      L.circleMarker(pts[0], { radius: 7, color: '#4ADE80', fillColor: '#4ADE80', fillOpacity: 1 }).addTo(map);
-                      L.circleMarker(pts[pts.length-1], { radius: 7, color: '${color}', fillColor: '${color}', fillOpacity: 1 }).addTo(map);
-                      map.fitBounds(poly.getBounds(), { padding: [20, 20] });
+                    function initMap() {
+                      var loader = document.getElementById('loader');
+                      if (loader) loader.style.display = 'none';
+                      var map = L.map('map', { zoomControl: false, attributionControl: false });
+                      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+                      }).addTo(map);
+                      if (pts.length > 0) {
+                        var poly = L.polyline(pts, { color: '${color}', weight: 4 }).addTo(map);
+                        L.circleMarker(pts[0], { radius: 7, color: '#4ADE80', fillColor: '#4ADE80', fillOpacity: 1 }).addTo(map);
+                        L.circleMarker(pts[pts.length-1], { radius: 7, color: '${color}', fillColor: '${color}', fillOpacity: 1 }).addTo(map);
+                        map.fitBounds(poly.getBounds(), { padding: [20, 20] });
+                      } else {
+                        map.setView([0, 0], 2);
+                      }
                     }
+                    if (typeof L !== 'undefined') { initMap(); }
+                    else { window.addEventListener('load', initMap); }
                   </script>
                 </body></html>` }}
-                javaScriptEnabled
-                scrollEnabled={false}
               />
               {isTracking && (
                 <View style={s.liveDotWrap}>
@@ -319,12 +367,12 @@ export default function ActivityScreen() {
           <>
             <View style={s.statsRow}>
               <StatCard icon="shoe-print" value={steps.toLocaleString()} label="Steps" color={color} colors={colors} />
-              <StatCard icon="map-marker-distance" value={`${distance.toFixed(2)} km`} label="Distance" color={colors.metricDistance} colors={colors} />
+              <StatCard icon="map-marker-distance" value={unitSystem === 'imperial' ? `${(distance * 0.621371).toFixed(2)} mi` : `${distance.toFixed(2)} km`} label="Distance" color={colors.metricDistance} colors={colors} />
               <StatCard icon="timer" value={formatDur(duration)} label="Time" color={colors.success} colors={colors} />
             </View>
             <View style={s.statsRow}>
               <StatCard icon="fire" value={`${calories}`} label="Kcal" color={colors.metricBurn} colors={colors} />
-              <StatCard icon="run" value={livePace} label="Pace/km" color={color} colors={colors} />
+              <StatCard icon="run" value={livePace} label={unitSystem === 'imperial' ? 'Pace/mi' : 'Pace/km'} color={color} colors={colors} />
               <StatCard icon="heart" value={currentBpm > 0 ? `${currentBpm} bpm` : 'Tap to add'}
                 label={hrZone?.name ?? 'Heart Rate'} color={hrZone?.color ?? colors.textDisabled}
                 colors={colors} onPress={currentBpm === 0 ? () => setShowHrModal(true) : undefined} />
@@ -340,10 +388,10 @@ export default function ActivityScreen() {
               <View style={[s.zonePill, { backgroundColor: paceZone.color + '15', borderColor: paceZone.color + '40' }]}>
                 <View style={[s.zoneDot, { backgroundColor: paceZone.color }]} />
                 <Text style={[s.zoneName, { color: paceZone.color }]}>{paceZone.name} Pace</Text>
-                <Text style={[s.zoneDesc, { color: colors.textSecondary }]}>{livePace} / km</Text>
+                <Text style={[s.zoneDesc, { color: colors.textSecondary }]}>{livePace} / {unitSystem === 'imperial' ? 'mi' : 'km'}</Text>
               </View>
             )}
-            <SplitsTable splits={splits} color={color} colors={colors} />
+            <SplitsTable splits={splits} color={color} colors={colors} unitSystem={unitSystem} />
           </>
         )}
 

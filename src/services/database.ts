@@ -58,11 +58,25 @@ function mapGoal(item: Record<string, any>): Goal {
   };
 }
 
+// ── Cached getAuthUser ────────────────────────────────────────────────────
+// PERF FIX: HomeScreen fires 7 parallel DB calls, each previously calling
+// supabase.auth.getUser() independently = 7 network round-trips just for auth.
+// Now cached for 30 seconds — a single network call serves the whole load.
+let _authUserCache: { user: any; expiresAt: number } | null = null;
+
 async function getAuthUser() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const now = Date.now();
+  if (_authUserCache && now < _authUserCache.expiresAt) {
+    return _authUserCache.user;
+  }
+  const { data: { user } } = await supabase.auth.getUser();
+  _authUserCache = { user, expiresAt: now + 30_000 }; // 30 second TTL
   return user;
+}
+
+/** Call this on sign-out to immediately invalidate the auth cache */
+export function clearAuthUserCache() {
+  _authUserCache = null;
 }
 
 export class DatabaseService {
@@ -90,6 +104,7 @@ export class DatabaseService {
           photo_url: activity.photoUrl ?? null,
           photo_overlay_url: activity.photoOverlayUrl ?? null,
           notes: activity.notes ?? null,
+          avg_heart_rate: activity.avgHeartRate ?? null,
         })
         .select()
         .single();
@@ -102,18 +117,18 @@ export class DatabaseService {
   }
 
   async getActivities(
-    _userId: string,
+    userId: string,
     startDate?: Date,
     endDate?: Date
   ): Promise<{ data: Activity[]; error: any }> {
     try {
-      const authUser = await getAuthUser();
-      if (!authUser) return { data: [], error: 'Not authenticated' };
+      // PERF FIX: use passed userId directly — avoids redundant getAuthUser() call
+      if (!userId) return { data: [], error: 'Not authenticated' };
 
       let query = supabase
         .from('activities')
         .select('*')
-        .eq('user_id', authUser.id)
+        .eq('user_id', userId)
         .order('start_time', { ascending: false });
 
       if (startDate) query = query.gte('start_time', startDate.toISOString());
@@ -129,18 +144,18 @@ export class DatabaseService {
   }
 
   async getRecentActivities(
-    _userId: string,
+    userId: string,
     limit = 10
   ): Promise<{ data: Activity[]; error: any }> {
-    const authUser = await getAuthUser();
-    if (!authUser) return { data: [], error: 'Not authenticated' };
+    // PERF FIX: use passed userId — no extra getAuthUser() call
+    if (!userId) return { data: [], error: 'Not authenticated' };
     const result = await withCache<Activity[]>(
-      `recent_activities/${authUser.id}/${limit}`,
+      `recent_activities/${userId}/${limit}`,
       TTL.ACTIVITIES,
       async () => {
         const { data, error } = await supabase
           .from('activities').select('*')
-          .eq('user_id', authUser.id)
+          .eq('user_id', userId)
           .order('start_time', { ascending: false }).limit(limit);
         if (error) return { data: [], error };
         return { data: (data ?? []).map(mapActivity), error: null };
@@ -198,15 +213,15 @@ export class DatabaseService {
     }
   }
 
-  async getGoals(_userId: string): Promise<{ data: Goal[]; error: any }> {
+  async getGoals(userId: string): Promise<{ data: Goal[]; error: any }> {
     try {
-      const authUser = await getAuthUser();
-      if (!authUser) return { data: [], error: 'Not authenticated' };
+      // PERF FIX: use passed userId
+      if (!userId) return { data: [], error: 'Not authenticated' };
 
       const { data, error } = await supabase
         .from('goals')
         .select('*')
-        .eq('user_id', authUser.id)
+        .eq('user_id', userId)
         .order('deadline', { ascending: true });
 
       if (error) throw error;
@@ -216,7 +231,6 @@ export class DatabaseService {
     }
   }
 
-  // ✅ NEW: Update entire goal (target, current, completed)
   async updateGoal(
     goalId: string,
     updates: { target?: number; current?: number; completed?: boolean }
@@ -246,7 +260,7 @@ export class DatabaseService {
     try {
       const target = await this.getGoalTarget(goalId);
       const completed = current >= target;
-      
+
       const { error } = await supabase
         .from('goals')
         .update({ current, completed })
@@ -313,19 +327,19 @@ export class DatabaseService {
   }
 
   async getDailyLog(
-    _userId: string,
+    userId: string,
     date: Date
   ): Promise<{ data: DailyLog | null; error: any }> {
-    const authUser = await getAuthUser();
-    if (!authUser) return { data: null, error: 'Not authenticated' };
+    // PERF FIX: use passed userId
+    if (!userId) return { data: null, error: 'Not authenticated' };
     const dateStr = dayjs(date).format('YYYY-MM-DD');
     const result = await withCache<DailyLog | null>(
-      `daily_log/${authUser.id}/${dateStr}`,
+      `daily_log/${userId}/${dateStr}`,
       TTL.DAILY_LOG,
       async () => {
         const { data, error } = await supabase
           .from('daily_logs').select('*')
-          .eq('user_id', authUser.id).eq('date', dateStr).single();
+          .eq('user_id', userId).eq('date', dateStr).single();
         if (error && error.code !== 'PGRST116') return { data: null, error };
         return { data: data ? mapDailyLog(data) : null, error: null };
       },
@@ -335,20 +349,20 @@ export class DatabaseService {
   }
 
   async getWeeklyLogs(
-    _userId: string,
+    userId: string,
     startDate: Date
   ): Promise<{ data: DailyLog[]; error: any }> {
-    const authUser = await getAuthUser();
-    if (!authUser) return { data: [], error: 'Not authenticated' };
+    // PERF FIX: use passed userId
+    if (!userId) return { data: [], error: 'Not authenticated' };
     const startStr = dayjs(startDate).format('YYYY-MM-DD');
     const endStr = dayjs(startDate).add(7, 'days').format('YYYY-MM-DD');
     const result = await withCache<DailyLog[]>(
-      `weekly_logs/${authUser.id}/${startStr}`,
+      `weekly_logs/${userId}/${startStr}`,
       TTL.WEEKLY_LOGS,
       async () => {
         const { data, error } = await supabase
           .from('daily_logs').select('*')
-          .eq('user_id', authUser.id)
+          .eq('user_id', userId)
           .gte('date', startStr).lte('date', endStr)
           .order('date', { ascending: true });
         if (error) return { data: [], error };
@@ -604,6 +618,7 @@ export class DatabaseService {
   }> {
     try {
       const startDate = dayjs().startOf(period).toDate();
+      // PERF FIX: pass userId directly so getActivities doesn't call getAuthUser() again
       const { data: activities } = await this.getActivities(userId, startDate);
 
       const totalSteps = activities.reduce((sum, a) => sum + a.steps, 0);
@@ -642,16 +657,15 @@ export class DatabaseService {
     }
   }
 
-
-  // ─── Weekly Steps (real data, no fabrication) ─────────────────────────────
+  // ─── Weekly Steps ─────────────────────────────────────────────────────────
 
   async getWeeklyStepsByDay(
-    _userId: string,
+    userId: string,
     weekStart: Date
   ): Promise<number[]> {
     try {
-      const authUser = await getAuthUser();
-      if (!authUser) return [0, 0, 0, 0, 0, 0, 0];
+      // PERF FIX: use passed userId — no getAuthUser() round-trip
+      if (!userId) return [0, 0, 0, 0, 0, 0, 0];
 
       const days: string[] = Array.from({ length: 7 }, (_, i) => {
         const d = new Date(weekStart);
@@ -662,7 +676,7 @@ export class DatabaseService {
       const { data } = await supabase
         .from('daily_logs')
         .select('date, steps')
-        .eq('user_id', authUser.id)
+        .eq('user_id', userId)
         .gte('date', days[0])
         .lte('date', days[6]);
 
@@ -684,7 +698,6 @@ export class DatabaseService {
 
       const today = new Date().toISOString().split('T')[0];
 
-      // Get week start (Monday)
       const now = new Date();
       const dayOfWeek = now.getDay();
       const diffToMonday = (dayOfWeek + 6) % 7;
@@ -706,7 +719,8 @@ export class DatabaseService {
           .gte('start_time', weekStartStr),
         supabase
           .from('goals')
-          .select('id, type, target, completed')
+          // FIX: added 'unit' to select — was causing TS2339 "unit does not exist" error
+          .select('id, type, target, unit, completed')
           .eq('user_id', authUser.id),
       ]);
 
@@ -735,7 +749,6 @@ export class DatabaseService {
             .from('goals')
             .update({ current, completed })
             .eq('id', goal.id);
-          // Fire feed event the first time a goal is completed
           if (completed && !wasCompleted) {
             socialService.publishFeedEvent('goal_achieved', {
               goalType: goal.type,
@@ -746,7 +759,7 @@ export class DatabaseService {
         }
       }
     } catch {
-      // Non-critical — don't crash the app
+      // Non-critical
     }
   }
 

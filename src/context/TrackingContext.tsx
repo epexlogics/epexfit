@@ -11,7 +11,7 @@ import { useAuth } from './AuthContext';
 
 interface TrackingContextType extends TrackingState {
   startTracking: (type: 'walking' | 'running' | 'cycling' | 'swimming' | 'strength' | 'hiit' | 'yoga' | 'football' | 'other') => Promise<void>;
-  stopTracking: () => Promise<Activity | null>;
+  stopTracking: (opts?: { avgHr?: number }) => Promise<Activity | null>;
   resetTracking: () => void;
 }
 
@@ -347,7 +347,7 @@ export const TrackingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const stopTracking = async (): Promise<Activity | null> => {
+  const stopTracking = async (opts?: { avgHr?: number }): Promise<Activity | null> => {
     pedometerSub.current?.remove();
     pedometerSub.current = null;
     locationSub.current?.remove();
@@ -394,6 +394,7 @@ export const TrackingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       startTime: startTimeRef.current ?? new Date(),
       endTime: new Date(),
       route: mergedRoute,
+      avgHeartRate: opts?.avgHr ?? undefined,
     };
 
     const { data, error } = await databaseService.saveActivity(activityData);

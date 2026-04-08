@@ -9,6 +9,7 @@
  */
 import React, { useEffect, Component, useState } from 'react';
 import { Text, View } from 'react-native';
+import * as Sentry from '@sentry/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
@@ -44,12 +45,23 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// ── Global error logging ───────────────────────────────────────────────────
-// Replace with Sentry.init(...) when Sentry is configured.
+// ── Sentry crash reporting ─────────────────────────────────────────────────
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    tracesSampleRate: 0.2,
+    environment: __DEV__ ? 'development' : 'production',
+    enabled: !__DEV__,
+  });
+}
+
 function logError(context: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[EpexFit:${context}]`, message);
-  // TODO: Sentry.captureException(err, { tags: { context } });
+  if (SENTRY_DSN && !__DEV__) {
+    Sentry.captureException(err, { tags: { context } });
+  }
 }
 
 // Catch unhandled promise rejections at the JS level

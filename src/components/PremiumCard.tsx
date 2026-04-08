@@ -34,7 +34,8 @@ export default function PremiumCard({
 }: PremiumCardProps) {
   const { colors, isDark } = useTheme();
   
-  const gradient = gradientColors ?? colors.gradientCard;
+ const gradient = (gradientColors ?? colors.gradientPrimary) as [string, string, ...string[]];
+
   const radius = size === 'xl' ? borderRadius.xl : borderRadius.lg;
   
   // Inner glow color (white at 10-15% opacity on top edge)

@@ -1,13 +1,18 @@
 /**
- * DirectMessagesScreen — Conversation inbox
+ * DirectMessagesScreen — Real-time conversation inbox
  *
- * Fixes:
- * - Improved dmService.getConversations() no longer has N+1 query
- * - Pull-to-refresh
- * - useFocusEffect so unread counts update when navigating back from chat
- * - New conversation button — navigates to UserSearch to pick someone
+ * ✅ Real Supabase data via dmService.getConversations()
+ * ✅ Unread badge counts from DB (no N+1 queries)
+ * ✅ Real-time: new incoming messages update unread badge live
+ * ✅ Pull-to-refresh
+ * ✅ useFocusEffect to reload when navigating back from chat
+ * ✅ Zero mock data
+ *
+ * FIX APPLIED: Added Supabase Realtime subscription on 'direct_messages'
+ * table so unread counts update instantly when a new message arrives —
+ * no need to leave and re-enter the screen.
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FlatList, Image, StyleSheet, Text,
   TouchableOpacity, View,
@@ -15,8 +20,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import EmptyState from '../../components/EmptyState';
 import { dmService, Conversation } from '../../services/dmService';
+import { supabase } from '../../services/supabase';
 import { spacing } from '../../constants/theme';
 import { TAB_BAR_HEIGHT } from '../../constants/layout';
 import dayjs from '../../utils/dayjs';
@@ -74,7 +81,7 @@ function ConversationCard({
           </Text>
           {item.unreadCount > 0 && (
             <View style={[cS.badge, { backgroundColor: accent }]}>
-              <Text style={cS.badgeText}>{item.unreadCount}</Text>
+              <Text style={cS.badgeText}>{item.unreadCount > 99 ? '99+' : item.unreadCount}</Text>
             </View>
           )}
         </View>
@@ -86,9 +93,11 @@ function ConversationCard({
 export default function DirectMessagesScreen() {
   const { colors } = useTheme();
   const accent = colors.primary;
+  const { user } = useAuth();
   const navigation = useNavigation<any>();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,10 +106,61 @@ export default function DirectMessagesScreen() {
     setLoading(false);
   }, []);
 
-  // Reload every time screen comes into focus (so unread badges update)
+  // Reload every time screen comes into focus (unread badges update after chat)
   useFocusEffect(useCallback(() => {
     load();
   }, [load]));
+
+  // Real-time: when a new DM arrives, bump unread count for that sender
+  useEffect(() => {
+    if (!user?.id) return;
+
+    channelRef.current = supabase
+      .channel(`dm_inbox:${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'direct_messages',
+          filter: `recipient_id=eq.${user.id}`,
+        },
+        (payload) => {
+          const row = payload.new as any;
+          const senderId = row?.sender_id;
+          if (!senderId) return;
+
+          setConversations(prev => {
+            const exists = prev.find(c => c.partnerId === senderId);
+            if (exists) {
+              // Update existing conversation: new last message + increment unread
+              return prev
+                .map(c =>
+                  c.partnerId === senderId
+                    ? {
+                        ...c,
+                        lastMessage: row.message ?? c.lastMessage,
+                        lastMessageAt: row.created_at ?? c.lastMessageAt,
+                        unreadCount: c.unreadCount + 1,
+                      }
+                    : c,
+                )
+                .sort((a, b) =>
+                  new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime(),
+                );
+            }
+            // New conversation — reload full list to get partner profile
+            load();
+            return prev;
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      channelRef.current?.unsubscribe();
+    };
+  }, [user?.id, load]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
@@ -129,11 +189,17 @@ export default function DirectMessagesScreen() {
             item={item}
             colors={colors}
             accent={accent}
-            onPress={() => navigation.navigate('Chat', {
-              partnerId: item.partnerId,
-              partnerName: item.partnerName,
-              partnerAvatar: item.partnerAvatar,
-            })}
+            onPress={() => {
+              // Reset unread count locally on open
+              setConversations(prev =>
+                prev.map(c => c.partnerId === item.partnerId ? { ...c, unreadCount: 0 } : c),
+              );
+              navigation.navigate('Chat', {
+                partnerId: item.partnerId,
+                partnerName: item.partnerName,
+                partnerAvatar: item.partnerAvatar,
+              });
+            }}
           />
         )}
         contentContainerStyle={[

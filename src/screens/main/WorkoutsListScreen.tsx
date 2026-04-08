@@ -239,6 +239,7 @@ export default function WorkoutsListScreen({ navigation }: any) {
     return EXERCISE_LIBRARY.filter(e => e.name.toLowerCase().includes(exSearch.toLowerCase()) || e.muscle.toLowerCase().includes(exSearch.toLowerCase()));
   }, [exSearch]);
 
+  // FIX: include all types present in Workout.type (must match DB values)
   const filterTypes = ['All', 'Strength', 'Cardio', 'HIIT', 'Yoga', 'Stretching', 'Other'];
 
   if (loading) return <ListScreenSkeleton rows={6} />;

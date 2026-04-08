@@ -139,12 +139,17 @@ const shadows = StyleSheet.create({
 });
 
 export async function shouldShowWeeklySnapshot(): Promise<boolean> {
-  const dayOfWeek = new Date().getDay();
-  if (dayOfWeek !== 1) return false;
+  const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon
   const thisWeek = dayjs().startOf('isoWeek').format('YYYY-[W]WW');
   try {
     const last = await AsyncStorage.getItem(SNAPSHOT_KEY);
-    return last !== thisWeek;
+    if (last === thisWeek) return false; // already shown this week
+    // Show on Monday (normal weekly recap)
+    if (dayOfWeek === 1) return true;
+    // Also show mid-week if user has never seen it (new install)
+    // — gives first-week users the motivational snapshot sooner
+    if (!last) return true;
+    return false;
   } catch { return false; }
 }
 

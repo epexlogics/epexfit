@@ -12,6 +12,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  Linking,
   ScrollView,
   StyleSheet,
   Switch,
@@ -22,20 +23,22 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import AppIcon from '../components/AppIcon';
 import { borderRadius, spacing } from '../constants/theme';
+import { UNIT_SYSTEM_KEY, type UnitSystem } from '../utils/units';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-export const UNIT_SYSTEM_KEY = '@epexfit_unit_system';
+export { UNIT_SYSTEM_KEY, type UnitSystem };
 export const PRIVACY_KEY     = '@epexfit_privacy_analytics';
 export const NOTIF_PREF_KEY  = '@epexfit_notif_preferences';
-
-export type UnitSystem = 'metric' | 'imperial';
 
 export interface NotifPreferences {
   workoutReminder: boolean;
@@ -221,13 +224,55 @@ export default function SettingsScreen() {
             Alert.alert(
               'Are you sure?',
               'Type DELETE in the next step would confirm. For now this routes to support.',
-              [{ text: 'Contact Support', onPress: () => { /* TODO: open mailto */ } }, { text: 'Cancel', style: 'cancel' }],
+              [{ text: 'Contact Support', onPress: () => Linking.openURL('mailto:support@epexfit.com?subject=Account%20Deletion%20Request') }, { text: 'Cancel', style: 'cancel' }],
             );
           },
         },
       ],
     );
   }, []);
+
+  // ── Export Data ──────────────────────────────────────────────────────────
+  const [exportingData, setExportingData] = useState(false);
+  const handleExportData = useCallback(async () => {
+    if (!user) return;
+    setExportingData(true);
+    try {
+      const { supabase } = await import('../services/supabase');
+      const [{ data: workouts }, { data: foodLogs }, { data: dailyLogs }, { data: activities }] =
+        await Promise.all([
+          supabase.from('workouts').select('*').eq('user_id', user.id),
+          supabase.from('food_logs').select('*').eq('user_id', user.id),
+          supabase.from('daily_logs').select('*').eq('user_id', user.id),
+          supabase.from('activities').select('*').eq('user_id', user.id),
+        ]);
+      const exportPayload = {
+        exportedAt: new Date().toISOString(),
+        userId: user.id,
+        workouts: workouts ?? [],
+        foodLogs: foodLogs ?? [],
+        dailyLogs: dailyLogs ?? [],
+        activities: activities ?? [],
+      };
+      const json = JSON.stringify(exportPayload, null, 2);
+      const fileUri = `${FileSystem.cacheDirectory}epexfit_export_${Date.now()}.json`;
+      await FileSystem.writeAsStringAsync(fileUri, json, { encoding: FileSystem.EncodingType.UTF8 });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/json',
+          dialogTitle: 'Export EpexFit Data',
+          UTI: 'public.json',
+        });
+      } else {
+        show({ message: 'Sharing is not available on this device.', variant: 'error' });
+      }
+    } catch (err: any) {
+      show({ message: err?.message ?? 'Export failed. Please try again.', variant: 'error' });
+    } finally {
+      setExportingData(false);
+    }
+  }, [user, show]);
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -397,8 +442,9 @@ export default function SettingsScreen() {
           <Row
             icon="export"
             label="Export My Data"
-            onPress={() => show({ message: 'Data export coming soon', variant: 'info' })}
-            showChevron
+            onPress={handleExportData}
+            showChevron={!exportingData}
+            right={exportingData ? <ActivityIndicator size="small" color={colors.textSecondary} /> : undefined}
           />
         </Section>
 
@@ -421,7 +467,9 @@ export default function SettingsScreen() {
           />
         </Section>
 
-        <Text style={[sS.version, { color: colors.textDisabled }]}>EpexFit v3.1.0</Text>
+        <Text style={[sS.version, { color: colors.textDisabled }]}>
+          EpexFit v{Constants.expoConfig?.version ?? '1.0.0'}
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

@@ -6,6 +6,7 @@ import {
 import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useUnitSystem } from '../../utils/units';
 import { databaseService } from '../../services/database';
 import { Goal } from '../../types';
 import AppIcon from '../../components/AppIcon';
@@ -37,6 +38,7 @@ export default function GoalsScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const unitSystem = useUnitSystem();
   const periodColors: Record<string, string> = {
     daily: colors.success,
     weekly: colors.warning,
@@ -205,10 +207,18 @@ export default function GoalsScreen() {
                   <View style={styles.goalProgress}>
                     <View style={styles.goalProgressLabels}>
                       <Text style={[styles.goalCurrent, { color: colors.text }]}>
-                        {Number(goal.current).toFixed(goal.unit === 'km' ? 1 : 0)} {goal.unit}
+                        {goal.unit === 'km'
+                          ? unitSystem === 'imperial'
+                            ? `${(Number(goal.current) * 0.621371).toFixed(1)} mi`
+                            : `${Number(goal.current).toFixed(1)} km`
+                          : `${Number(goal.current).toFixed(0)} ${goal.unit}`}
                       </Text>
                       <Text style={[styles.goalTarget, { color: colors.textSecondary }]}>
-                        / {Number(goal.target).toFixed(goal.unit === 'km' ? 1 : 0)} {goal.unit}
+                        / {goal.unit === 'km'
+                          ? unitSystem === 'imperial'
+                            ? `${(Number(goal.target) * 0.621371).toFixed(1)} mi`
+                            : `${Number(goal.target).toFixed(1)} km`
+                          : `${Number(goal.target).toFixed(0)} ${goal.unit}`}
                       </Text>
                     </View>
                     <ProgressBar progress={progress} color={goal.completed ? colors.success : color} />

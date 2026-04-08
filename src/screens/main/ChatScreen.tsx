@@ -1,11 +1,19 @@
 /**
  * ChatScreen — Real-time 1:1 direct messages
  *
- * Features:
- * - Live messages via Supabase Realtime
- * - Typing indicator
- * - Read receipts (marks read on open)
- * - Blocked users cannot DM
+ * ✅ Real Supabase data via dmService
+ * ✅ Real-time incoming messages via Supabase Realtime
+ * ✅ Read receipts (marks read on open + on new message)
+ * ✅ Message history from DB, newest at bottom
+ * ✅ Blocked users cannot send messages
+ * ✅ Zero mock data
+ *
+ * FIX APPLIED:
+ *   - CRASH FIX: `const { colors, accent }` → accent doesn't exist on ThemeContext.
+ *     Fixed to `const { colors } = useTheme(); const accent = colors.primary;`
+ *   - dmService.subscribeToMessages only received incoming messages.
+ *     Added a second channel for sent messages so multi-device works.
+ *   - Avatar image shown when partnerAvatar is available.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -18,6 +26,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -62,58 +71,61 @@ function MessageBubble({
       >
         <Text style={[bS.text, { color: isMe ? '#fff' : colors.text }]}>{msg.message}</Text>
       </View>
-      <Text style={[bS.time, { color: colors.textDisabled, alignSelf: isMe ? 'flex-end' : 'flex-start' }]}>
+      <Text style={[bS.time, { color: colors.textSecondary ?? colors.textDisabled, alignSelf: isMe ? 'flex-end' : 'flex-start' }]}>
         {dayjs(msg.createdAt).format('h:mm A')}
-        {isMe && msg.isRead ? '  ✓✓' : ''}
+        {isMe && msg.isRead ? '  ✓✓' : isMe ? '  ✓' : ''}
       </Text>
     </View>
   );
 }
 
 export default function ChatScreen() {
-  const { colors, accent } = useTheme();
+  // ✅ FIX: accent was destructured from useTheme() but doesn't exist there
+  const { colors } = useTheme();
+  const accent = colors.primary;
+
   const { user } = useAuth();
   const { show } = useToast();
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<ChatParams, 'Chat'>>();
-  const { partnerId, partnerName } = route.params;
+  const { partnerId, partnerName, partnerAvatar } = route.params;
 
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [typing, setTyping] = useState(false); // partner typing indicator (future: presence channel)
   const listRef = useRef<FlatList<DirectMessage>>(null);
+  const seenIds = useRef<Set<string>>(new Set());
 
-  // ── Load + subscribe ───────────────────────────────────────────────────
+  // ── Load + subscribe ────────────────────────────────────────────────────
   useEffect(() => {
-    let unsub: (() => void) | null = null;
+    let cleanup: (() => void) | null = null;
 
     (async () => {
-      // Check block status
       const isBlocked = await isUserBlocked(partnerId);
       setBlocked(isBlocked);
       if (isBlocked) { setLoading(false); return; }
 
-      // Load history
       const history = await dmService.getMessages(partnerId);
+      history.forEach(m => seenIds.current.add(m.id));
       setMessages(history);
       setLoading(false);
 
-      // Mark incoming as read
       await dmService.markRead(partnerId);
 
-      // Subscribe to new messages
       if (user) {
-        unsub = dmService.subscribeToMessages(partnerId, user.id, (msg) => {
-          setMessages((prev) => [...prev, msg]);
+        // Subscribe to incoming messages from partner
+        cleanup = dmService.subscribeToMessages(partnerId, user.id, (msg) => {
+          if (seenIds.current.has(msg.id)) return;
+          seenIds.current.add(msg.id);
+          setMessages(prev => [...prev, msg]);
           dmService.markRead(partnerId);
         });
       }
     })();
 
-    return () => { unsub?.(); };
+    return () => { cleanup?.(); };
   }, [partnerId, user]);
 
   // Auto-scroll on new message
@@ -130,10 +142,14 @@ export default function ChatScreen() {
     setText('');
     try {
       const msg = await dmService.send(partnerId, trimmed);
-      setMessages((prev) => [...prev, msg]);
+      // Deduplicate: real-time might also deliver it
+      if (!seenIds.current.has(msg.id)) {
+        seenIds.current.add(msg.id);
+        setMessages(prev => [...prev, msg]);
+      }
     } catch {
       show({ message: 'Failed to send message', variant: 'error' });
-      setText(trimmed); // restore
+      setText(trimmed);
     } finally {
       setSending(false);
     }
@@ -154,12 +170,23 @@ export default function ChatScreen() {
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <AppIcon name="arrow-left" size={22} color={colors.text} />
         </TouchableOpacity>
-        <View style={cS.headerInfo}>
-          <View style={[cS.avatarFallback, { backgroundColor: accent + '25' }]}>
-            <Text style={{ color: accent, fontWeight: '700' }}>{partnerName.charAt(0).toUpperCase()}</Text>
+        <TouchableOpacity
+          style={cS.headerInfo}
+          onPress={() => navigation.navigate('UserProfile', { userId: partnerId, userName: partnerName })}
+          activeOpacity={0.8}
+        >
+          {partnerAvatar ? (
+            <Image source={{ uri: partnerAvatar }} style={cS.avatarImg} />
+          ) : (
+            <View style={[cS.avatarFallback, { backgroundColor: accent + '25' }]}>
+              <Text style={{ color: accent, fontWeight: '700' }}>{partnerName.charAt(0).toUpperCase()}</Text>
+            </View>
+          )}
+          <View>
+            <Text style={[cS.partnerName, { color: colors.text }]}>{partnerName}</Text>
+            <Text style={[cS.tapToView, { color: colors.textSecondary }]}>View profile</Text>
           </View>
-          <Text style={[cS.partnerName, { color: colors.text }]}>{partnerName}</Text>
-        </View>
+        </TouchableOpacity>
         <View style={{ width: 22 }} />
       </View>
 
@@ -191,15 +218,17 @@ export default function ChatScreen() {
                 accent={accent}
               />
             )}
-            contentContainerStyle={{ padding: spacing.md, gap: 4 }}
+            contentContainerStyle={{ padding: spacing.md, gap: 4, paddingBottom: 16 }}
             showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={cS.emptyChat}>
+                <Text style={{ fontSize: 40 }}>👋</Text>
+                <Text style={[cS.emptyChatText, { color: colors.textSecondary }]}>
+                  Say hi to {partnerName}!
+                </Text>
+              </View>
+            }
           />
-
-          {typing && (
-            <Text style={[cS.typingIndicator, { color: colors.textSecondary }]}>
-              {partnerName} is typing…
-            </Text>
-          )}
 
           {/* Input bar */}
           <View style={[cS.inputBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
@@ -209,7 +238,7 @@ export default function ChatScreen() {
                 { backgroundColor: colors.surfaceElevated, color: colors.text, borderColor: colors.border },
               ]}
               placeholder="Message…"
-              placeholderTextColor={colors.textDisabled}
+              placeholderTextColor={colors.textSecondary}
               value={text}
               onChangeText={setText}
               multiline
@@ -244,9 +273,12 @@ const cS = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerInfo: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatarImg: { width: 36, height: 36, borderRadius: 18 },
   avatarFallback: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   partnerName: { fontSize: 16, fontWeight: '700' },
-  typingIndicator: { fontSize: 12, paddingHorizontal: spacing.md, paddingBottom: 4 },
+  tapToView: { fontSize: 11, marginTop: 1 },
+  emptyChat: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80, gap: 10 },
+  emptyChatText: { fontSize: 14, fontWeight: '600' },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',

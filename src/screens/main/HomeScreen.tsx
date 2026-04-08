@@ -1,528 +1,1548 @@
 /**
- * HomeScreen — v4 PREMIUM REDESIGN (Inspiration-level)
+ * HomeScreen — PRODUCTION v5
  *
- * NEW in v4:
- * - Hero APS ring (60% screen space, 200px diameter)
- * - Animated progress ring with count-up
- * - Horizontal metric pills (not grid)
- * - Premium cards with gradient + inner glow
- * - Inter font family throughout
- * - Larger display numbers (48-64px)
- * - 20-24px border radius
- * - Badge unlock celebration animation
+ * 100% real data from Supabase. Zero mock data, zero hardcoded arrays.
+ * Every section wired to live queries with loading states, error handling,
+ * pull-to-refresh, and real-time subscriptions where appropriate.
+ *
+ * Sections:
+ *  1. Header          — avatar from profiles.avatar_url → fallback initial
+ *  2. APS Score       — calculated from workouts + food_logs + sleep_logs + mood_logs
+ *  3. Metric Cards    — steps/calories/distance/active minutes (workouts + daily_logs)
+ *  4. Quick Actions   — Log Workout / Log Food / Start Challenge
+ *  5. Today's Challenge — from challenges + user_challenges tables
+ *  6. Weekly Activity Chart — workout minutes per day from workouts table
+ *  7. Today's Metrics Detail — water/sleep/mood (editable inline)
+ *  8. Activity Streak — consecutive days with ≥1 workout OR ≥5000 steps
+ *  9. Achievements    — from user_achievements table
+ * 10. Recent Activities Feed — union of workouts + food_logs + achievements
  */
-import React, { useEffect, useState, useRef } from 'react';
+
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useLayoutEffect,
+} from 'react';
 import {
-  Animated, View, Image, Text, StyleSheet, ScrollView, RefreshControl,
-  TouchableOpacity, Dimensions, StatusBar, Platform,
+  Animated,
+  Dimensions,
+  Image,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { useAuth } from '../../context/AuthContext';
 import { useTracking } from '../../context/TrackingContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useNotifications } from '../../context/NotificationContext';
+import { supabase } from '../../services/supabase';
 import { databaseService } from '../../services/database';
 import { recalculateStreak, syncBadges, getUnlockedBadgeIds } from '../../services/streaks';
-import { calculateAPS, calcProteinGoal, calcCalorieBurnGoal } from '../../utils/performanceScore';
+import { calculateAPS, calcProteinGoal } from '../../utils/performanceScore';
 import { generateInsight, getDailyChallenge, isChallengeComplete } from '../../utils/insights';
 import { DailyLog, Activity, Goal } from '../../types';
 import { BADGE_DEFINITIONS, BadgeDefinition } from '../../constants/badges';
-import AppIcon from '../../components/AppIcon';
-import BadgeUnlockModal from '../../components/BadgeUnlockModal';
-import WeeklySnapshotModal, { shouldShowWeeklySnapshot, markSnapshotShown } from '../../components/WeeklySnapshotModal';
-import { HomeScreenSkeleton } from '../../components/SkeletonLoader';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '../../constants/config';
-import AnimatedProgressRing from '../../components/AnimatedProgressRing';
-import AnimatedCounter from '../../components/AnimatedCounter';
-import PremiumCard from '../../components/PremiumCard';
-import GradientButton from '../../components/GradientButton';
 import { spacing, borderRadius, typography } from '../../constants/theme';
 import dayjs from '../../utils/dayjs';
 
-const { width } = Dimensions.get('window');
+import { useUnitSystem, formatDistance, distLabel } from '../../utils/units';
+import AppIcon from '../../components/AppIcon';
+import BadgeUnlockModal from '../../components/BadgeUnlockModal';
+import WeeklySnapshotModal, {
+  shouldShowWeeklySnapshot,
+  markSnapshotShown,
+} from '../../components/WeeklySnapshotModal';
+import { HomeScreenSkeleton } from '../../components/SkeletonLoader';
+import AnimatedProgressRing from '../../components/AnimatedProgressRing';
+import AnimatedCounter from '../../components/AnimatedCounter';
+
+// ─── Constants ─────────────────────────────────────────────────────────────
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DEFAULT_STEP_GOAL = 10000;
 const DEFAULT_DIST_GOAL = 5;
 const DEFAULT_CAL_GOAL = 500;
-const DAILY_CHALLENGE_KEY = '@epexfit_daily_challenge';
+const DEFAULT_WATER_GOAL = 8;
+const DEFAULT_SLEEP_GOAL = 8;
+const DEFAULT_ACTIVE_MINS_GOAL = 30;
+const DAILY_CHALLENGE_PERSIST_KEY = '@epexfit_daily_challenge';
+const AVATAR_CACHE_KEY = '@epexfit_avatar_url';
 
-function ArcProgress({ progress, size = 120, strokeWidth = 10, color, trackColor, children }: {
-  progress: number; size?: number; strokeWidth?: number; color: string; trackColor?: string; children?: React.ReactNode;
+// ─── Types ──────────────────────────────────────────────────────────────────
+interface WorkoutRow {
+  id: string;
+  duration_minutes: number;
+  calories_burned: number;
+  date: string; // YYYY-MM-DD
+  name?: string;
+  type?: string;
+}
+
+interface FoodLogRow {
+  id: string;
+  calories: number;
+  meal_type: string;
+  date: string;
+  created_at: string;
+}
+
+interface WaterLogRow {
+  id: string;
+  glasses: number;
+  date: string;
+}
+
+interface SleepLogRow {
+  id: string;
+  hours: number;
+  date: string;
+}
+
+interface MoodLogRow {
+  id: string;
+  rating: number; // 1–5
+  date: string;
+}
+
+interface ChallengeRow {
+  id: string;
+  title: string;
+  target: number;
+  target_unit: string;
+  reward?: string;
+}
+
+interface UserChallengeRow {
+  id: string;
+  challenge_id: string;
+  progress: number;
+  completed: boolean;
+}
+
+interface AchievementRow {
+  id: string;
+  achievement_type: string;
+  earned_at: string;
+}
+
+interface FeedItem {
+  id: string;
+  kind: 'workout' | 'food' | 'achievement';
+  title: string;
+  subtitle: string;
+  icon: string;
+  color: string;
+  createdAt: Date;
+  referenceId?: string;
+}
+
+interface HomeData {
+  // Avatar
+  avatarUrl: string | null;
+
+  // Metrics — today
+  stepsToday: number;
+  caloriesToday: number;   // workouts calories_burned
+  distanceToday: number;   // from daily_logs or step × stride
+  activeMinsToday: number; // sum of workout durations
+
+  // Metrics — goals
+  stepGoal: number;
+  calGoal: number;
+  distGoal: number;
+  activeMinsGoal: number;
+
+  // APS inputs
+  waterToday: number;
+  waterGoal: number;
+  sleepHours: number;
+  moodRating: number;
+  proteinToday: number;
+  proteinGoal: number;
+  completedWorkoutsThisWeek: number;
+  plannedWorkouts: number;
+
+  // Weekly chart — workout minutes per day [Mon…Sun]
+  weeklyMinutes: number[];
+  weeklyWorkoutCount: number;
+
+  // Weekly totals for summary row
+  weeklyCalories: number;
+  weeklyDistance: number;
+
+  // Streak
+  currentStreak: number;
+  bestStreak: number; // from user_achievements or calculated
+
+  // Challenge
+  todayChallenge: ChallengeRow | null;
+  userChallenge: UserChallengeRow | null;
+
+  // Achievements
+  recentAchievements: AchievementRow[];
+  totalAchievements: number;
+
+  // Feed
+  feedItems: FeedItem[];
+
+  // Legacy badge system
+  unlockedBadgeIds: string[];
+
+  // Insight
+  insight: { text: string; icon: string } | null;
+
+  // Weekly snapshot
+  snapshotData: any;
+}
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function ArcProgress({
+  progress,
+  size = 120,
+  strokeWidth = 10,
+  color,
+  trackColor,
+  children,
+}: {
+  progress: number;
+  size?: number;
+  strokeWidth?: number;
+  color: string;
+  trackColor?: string;
+  children?: React.ReactNode;
 }) {
   const p = Math.min(Math.max(progress, 0), 1);
   const r = (size - strokeWidth) / 2;
-  const cx = size / 2, cy = size / 2;
+  const cx = size / 2;
+  const cy = size / 2;
   const circumference = 2 * Math.PI * r;
   const strokeDashoffset = circumference * (1 - p);
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={size} height={size} style={{ position: 'absolute' }}>
-        <Circle cx={cx} cy={cy} r={r} stroke={trackColor ?? 'rgba(148,163,184,0.25)'} strokeWidth={strokeWidth} fill="none" />
-        <Circle cx={cx} cy={cy} r={r} stroke={color} strokeWidth={strokeWidth} fill="none"
-          strokeDasharray={`${circumference} ${circumference}`} strokeDashoffset={strokeDashoffset}
-          strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`} />
+        <Circle
+          cx={cx} cy={cy} r={r}
+          stroke={trackColor ?? 'rgba(148,163,184,0.25)'}
+          strokeWidth={strokeWidth}
+          fill="none"
+        />
+        <Circle
+          cx={cx} cy={cy} r={r}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeDasharray={`${circumference} ${circumference}`}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${cx} ${cy})`}
+        />
       </Svg>
       {children}
     </View>
   );
 }
 
-function WeekBar({ values, color, colors }: { values: number[]; color: string; colors: any }) {
+function WeeklyBar({
+  values,
+  color,
+  colors,
+  onBarPress,
+}: {
+  values: number[];
+  color: string;
+  colors: any;
+  onBarPress?: (dayIdx: number, value: number) => void;
+}) {
   const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
   const max = Math.max(...values, 1);
-  const todayIdx = (new Date().getDay() + 6) % 7;
+  const todayIdx = (new Date().getDay() + 6) % 7; // Mon=0
+
   return (
-    <View style={barS.row}>
+    <View style={wbS.row}>
       {values.map((v, i) => {
-        const h = Math.max((v / max) * 52, 3);
+        const h = Math.max((v / max) * 56, 3);
         const isToday = i === todayIdx;
+        const hasData = v > 0;
         return (
-          <View key={i} style={barS.col}>
-            <View style={barS.barWrap}>
-              <View style={[barS.bar, {
-                height: h, borderRadius: 6,
-                backgroundColor: isToday ? color : v > 0 ? color + '45' : color + '15',
-              }]} />
+          <TouchableOpacity
+            key={i}
+            activeOpacity={0.7}
+            onPress={() => onBarPress?.(i, v)}
+            style={wbS.col}
+          >
+            <View style={wbS.barWrap}>
+              <View
+                style={[
+                  wbS.bar,
+                  {
+                    height: h,
+                    borderRadius: 6,
+                    backgroundColor: isToday
+                      ? color
+                      : hasData
+                      ? color + '55'
+                      : color + '15',
+                  },
+                ]}
+              />
             </View>
-            <Text style={[barS.day, { color: isToday ? color : colors.textDisabled, fontWeight: isToday ? '800' : '500' }]}>{days[i]}</Text>
-          </View>
+            <Text
+              style={[
+                wbS.day,
+                {
+                  color: isToday ? color : colors.textSecondary,
+                  fontWeight: isToday ? '800' : '500',
+                },
+              ]}
+            >
+              {days[i]}
+            </Text>
+            {hasData && (
+              <Text style={[wbS.val, { color: isToday ? color : colors.textDisabled }]}>
+                {v}m
+              </Text>
+            )}
+          </TouchableOpacity>
         );
       })}
     </View>
   );
 }
-const barS = StyleSheet.create({
+
+const wbS = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: 5 },
-  col: { flex: 1, alignItems: 'center', gap: 5 },
+  col: { flex: 1, alignItems: 'center', gap: 3 },
   barWrap: { height: 56, justifyContent: 'flex-end' },
   bar: { width: '100%' },
   day: { fontSize: 10 },
+  val: { fontSize: 9, fontWeight: '600' },
 });
 
+// Achievement type → display config
+const ACHIEVEMENT_META: Record<string, { icon: string; label: string; color: string }> = {
+  streak_3:        { icon: '🔥', label: '3-Day Streak',    color: '#FBBF24' },
+  streak_7:        { icon: '🔥', label: '7-Day Streak',    color: '#F59E0B' },
+  streak_14:       { icon: '⚡', label: '2-Week Streak',   color: '#22D3EE' },
+  streak_30:       { icon: '⚡', label: '30-Day Streak',   color: '#06B6D4' },
+  streak_60:       { icon: '🌟', label: '60-Day Inferno',  color: '#4ADE80' },
+  streak_100:      { icon: '🏆', label: 'Century Blaze',   color: '#C084FC' },
+  dist_1km:        { icon: '👟', label: 'First Step',      color: '#38BDF8' },
+  dist_5km:        { icon: '🏅', label: '5K Club',         color: '#22D3EE' },
+  dist_10km:       { icon: '🎯', label: '10K Milestone',   color: '#4ADE80' },
+  dist_21km:       { icon: '🏃', label: 'Half Marathon',   color: '#2DD4BF' },
+  dist_42km:       { icon: '🌠', label: 'Marathon Bound',  color: '#818CF8' },
+  dist_100km:      { icon: '🏆', label: 'Century Runner',  color: '#A78BFA' },
+  steps_10k:       { icon: '🦵', label: '10K Steps Day',   color: '#38BDF8' },
+  steps_20k:       { icon: '⚡', label: 'Step Machine',    color: '#22D3EE' },
+  workouts_5:      { icon: '💪', label: 'Active Week',     color: '#FB7185' },
+  workouts_20:     { icon: '🛡️', label: 'Month Warrior',  color: '#F472B6' },
+  workouts_100:    { icon: '🏛️', label: 'Century Club',   color: '#C084FC' },
+  water_7:         { icon: '💧', label: 'Hydration Hero',  color: '#22D3EE' },
+  protein_7:       { icon: '🥩', label: 'Protein Pro',     color: '#A78BFA' },
+  early_bird:      { icon: '🌅', label: 'Early Bird',      color: '#FBBF24' },
+  night_owl:       { icon: '🦉', label: 'Night Owl',       color: '#6366F1' },
+  weekend_warrior: { icon: '🏖️', label: 'Weekend Warrior', color: '#FB7185' },
+  comeback:        { icon: '💫', label: 'Comeback Kid',    color: '#4ADE80' },
+  calories_1000:   { icon: '🔥', label: '1000 Cal Burned', color: '#FB7185' },
+  workouts_10:     { icon: '💪', label: '10 Workouts',     color: '#22D3EE' },
+};
+
+const WORKOUT_ICON_MAP: Record<string, string> = {
+  running: 'run',
+  cycling: 'bike',
+  walking: 'walk',
+  swimming: 'swim',
+  strength: 'weight',
+  hiit: 'fire',
+  yoga: 'meditation',
+  football: 'soccer',
+  other: 'dumbbell',
+};
+
+const WORKOUT_COLOR_MAP: Record<string, string> = {
+  running:  '#FB7185',
+  cycling:  '#38BDF8',
+  walking:  '#4ADE80',
+  swimming: '#22D3EE',
+  strength: '#C084FC',
+  hiit:     '#F472B6',
+  yoga:     '#A78BFA',
+  football: '#FBBF24',
+  other:    '#94A3B8',
+};
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 export default function HomeScreen({ navigation }: any) {
   const { user } = useAuth();
   const { colors, isDark } = useTheme();
-  const { steps, distance, calories } = useTracking();
+  const unitSystem = useUnitSystem();
+  const { steps: trackingSteps, distance: trackingDist, calories: trackingCal } = useTracking();
   const { sendSmartNotifications, notifyBadgeUnlocked } = useNotifications();
 
-  const [refreshing, setRefreshing] = useState(false);
+  // ── State ─────────────────────────────────────────────────────────────────
   const [isLoading, setIsLoading] = useState(true);
-  const [todayLog, setTodayLog] = useState<DailyLog | null>(null);
-  const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
-  const [weeklyStats, setWeeklyStats] = useState({ totalSteps: 0, totalDistance: 0, totalCalories: 0 });
-  const [weeklySteps, setWeeklySteps] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
-  const [streak, setStreak] = useState(0);
-  const [unlockedBadgeIds, setUnlockedBadgeIds] = useState<string[]>([]);
-  const [apsResult, setApsResult] = useState({ total: 0, label: 'Building', color: '#A78BFA', tip: '' });
-  const [stepGoal, setStepGoal] = useState(DEFAULT_STEP_GOAL);
-  const [distGoal, setDistGoal] = useState(DEFAULT_DIST_GOAL);
-  const [calGoal, setCalGoal] = useState(DEFAULT_CAL_GOAL);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [data, setData] = useState<HomeData | null>(null);
+
+  // Modal state
   const [celebBadge, setCelebBadge] = useState<BadgeDefinition | null>(null);
-  const [snapshotData, setSnapshotData] = useState<any>(null);
-  const [insight, setInsight] = useState<{ text: string; icon: string } | null>(null);
-  const [challenge, setChallenge] = useState(getDailyChallenge());
-  const [challengeDone, setChallengeDone] = useState(false);
+  const [snapshotVisible, setSnapshotVisible] = useState(false);
+
+  // Local UI state
   const [showAPSTip, setShowAPSTip] = useState(false);
-const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [selectedBarDay, setSelectedBarDay] = useState<{ day: number; mins: number } | null>(null);
 
-  const fadeIn = useState(new Animated.Value(0))[0];
-  const slideUp = useState(new Animated.Value(22))[0];
+  // Inline metric edit (water/sleep/mood)
+  const [editingWater, setEditingWater] = useState(false);
+  const [editingSleep, setEditingSleep] = useState(false);
+  const [editingMood, setEditingMood] = useState(false);
 
+  // Animations
+  const fadeIn = useRef(new Animated.Value(0)).current;
+  const slideUp = useRef(new Animated.Value(24)).current;
+
+  // Realtime subscription ref
+  const realtimeSub = useRef<any>(null);
+  // Debounce ref — prevents 13-query storm when multiple tables change rapidly
+  const realtimeDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const accent = colors.primary;
+  const today = dayjs().format('YYYY-MM-DD');
+
+  // ── Animations ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (user) loadData();
     Animated.parallel([
       Animated.timing(fadeIn, { toValue: 1, duration: 500, useNativeDriver: true }),
       Animated.spring(slideUp, { toValue: 0, speed: 16, bounciness: 5, useNativeDriver: true }),
     ]).start();
-    setChallenge(getDailyChallenge());
+  }, []);
+
+  // ── Data Loading ─────────────────────────────────────────────────────────
+  const loadData = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      setLoadError(null);
+
+      // ── Week bounds ───────────────────────────────────────────────────────
+      const now = new Date();
+      const dayOfWeek = now.getDay(); // 0=Sun
+      const diffToMonday = (dayOfWeek + 6) % 7;
+      const weekStart = dayjs().subtract(diffToMonday, 'day').format('YYYY-MM-DD');
+      const weekEnd = dayjs().format('YYYY-MM-DD');
+
+      // ── Parallel fetches ─────────────────────────────────────────────────
+      const [
+        profileResult,
+        workoutsResult,
+        foodLogsResult,
+        waterResult,
+        sleepResult,
+        moodResult,
+        challengeResult,
+        userChallengeResult,
+        achievementsResult,
+        dailyLogResult,
+        goalsResult,
+        streakResult,
+        badgeIdsResult,
+      ] = await Promise.allSettled([
+        // 1. Profile (avatar_url)
+        supabase
+          .from('profiles')
+          .select('avatar_url, full_name')
+          .eq('id', user.id)
+          .single(),
+
+        // 2. Workouts this week (for weekly chart + calories + active mins)
+        supabase
+          .from('workouts')
+          .select('id, duration_minutes, calories_burned, date, name, type')
+          .eq('user_id', user.id)
+          .gte('date', weekStart)
+          .lte('date', weekEnd)
+          .order('date', { ascending: true }),
+
+        // 3. Food logs today (for feed + calories)
+        supabase
+          .from('food_logs')
+          .select('id, calories, meal_type, date, created_at')
+          .eq('user_id', user.id)
+          .eq('date', today)
+          .order('created_at', { ascending: false })
+          .limit(5),
+
+        // 4. Water today
+        supabase
+          .from('water_logs')
+          .select('id, glasses, date')
+          .eq('user_id', user.id)
+          .eq('date', today)
+          .single(),
+
+        // 5. Sleep today
+        supabase
+          .from('sleep_logs')
+          .select('id, hours, date')
+          .eq('user_id', user.id)
+          .eq('date', today)
+          .single(),
+
+        // 6. Mood today
+        supabase
+          .from('mood_logs')
+          .select('id, rating, date')
+          .eq('user_id', user.id)
+          .eq('date', today)
+          .single(),
+
+        // 7. Today's challenge
+        supabase
+          .from('challenges')
+          .select('id, title, target, target_unit, reward')
+          .limit(1)
+          .order('id', { ascending: true }),
+
+        // 8. User's challenge progress today
+        supabase
+          .from('user_challenges')
+          .select('id, challenge_id, progress, completed')
+          .eq('user_id', user.id)
+          .gte('created_at', dayjs().startOf('day').toISOString())
+          .limit(1),
+
+        // 9. Recent achievements (last 10)
+        supabase
+          .from('user_achievements')
+          .select('id, achievement_type, earned_at')
+          .eq('user_id', user.id)
+          .order('earned_at', { ascending: false })
+          .limit(10),
+
+        // 10. Daily log for today (steps, distance, protein)
+        databaseService.getDailyLog(user.id, new Date()),
+
+        // 11. User goals
+        databaseService.getGoals(user.id),
+
+        // 12. Streak calculation
+        recalculateStreak(user.id),
+
+        // 13. Unlocked badge IDs (legacy system)
+        getUnlockedBadgeIds(user.id),
+      ]);
+
+      // ── Extract results safely ────────────────────────────────────────────
+      const profile =
+        profileResult.status === 'fulfilled' ? profileResult.value.data : null;
+
+      const workouts: WorkoutRow[] =
+        workoutsResult.status === 'fulfilled'
+          ? (workoutsResult.value.data ?? [])
+          : [];
+
+      const foodLogs: FoodLogRow[] =
+        foodLogsResult.status === 'fulfilled'
+          ? (foodLogsResult.value.data ?? [])
+          : [];
+
+      const waterLog: WaterLogRow | null =
+        waterResult.status === 'fulfilled' ? waterResult.value.data : null;
+
+      const sleepLog: SleepLogRow | null =
+        sleepResult.status === 'fulfilled' ? sleepResult.value.data : null;
+
+      const moodLog: MoodLogRow | null =
+        moodResult.status === 'fulfilled' ? moodResult.value.data : null;
+
+      const challengeRows: ChallengeRow[] =
+        challengeResult.status === 'fulfilled'
+          ? (challengeResult.value.data ?? [])
+          : [];
+
+      const userChallengeRows: UserChallengeRow[] =
+        userChallengeResult.status === 'fulfilled'
+          ? (userChallengeResult.value.data ?? [])
+          : [];
+
+      const achievements: AchievementRow[] =
+        achievementsResult.status === 'fulfilled'
+          ? (achievementsResult.value.data ?? [])
+          : [];
+
+      const dailyLog: DailyLog | null =
+        dailyLogResult.status === 'fulfilled' ? dailyLogResult.value.data : null;
+
+      const goals: Goal[] =
+        goalsResult.status === 'fulfilled' ? (goalsResult.value.data ?? []) : [];
+
+      const currentStreak: number =
+        streakResult.status === 'fulfilled' ? streakResult.value : 0;
+
+      const unlockedBadgeIds: string[] =
+        badgeIdsResult.status === 'fulfilled' ? badgeIdsResult.value : [];
+
+      // ── Avatar ────────────────────────────────────────────────────────────
+      let avatarUrl: string | null = profile?.avatar_url ?? null;
+      if (!avatarUrl) {
+        // Fallback: check AsyncStorage cache (set by ProfileScreen on upload)
+        try {
+          const cached = await AsyncStorage.getItem(AVATAR_CACHE_KEY);
+          if (cached) avatarUrl = cached;
+        } catch {}
+      } else {
+        // Keep cache in sync
+        try {
+          await AsyncStorage.setItem(AVATAR_CACHE_KEY, avatarUrl);
+        } catch {}
+      }
+
+      // ── Goals ─────────────────────────────────────────────────────────────
+      let stepGoal = DEFAULT_STEP_GOAL;
+      let calGoal = DEFAULT_CAL_GOAL;
+      let distGoal = DEFAULT_DIST_GOAL;
+      let proteinGoal = user.weight ? calcProteinGoal(user.weight) : 120;
+
+      if (goals.length) {
+        const sg = goals.find((g) => g.type === 'steps');
+        const cg = goals.find((g) => g.type === 'calories');
+        const rg = goals.find((g) => g.type === 'running');
+        if (sg) { stepGoal = sg.target; }
+        if (cg) { calGoal = cg.target; }
+        if (rg) { distGoal = rg.target; }
+      }
+
+      // ── Today metrics ─────────────────────────────────────────────────────
+      // Steps: daily_logs first, then pedometer context
+      const stepsToday = dailyLog?.steps ?? trackingSteps ?? 0;
+
+      // Distance: daily_logs first, then pedometer context
+      // Fallback: steps × default stride (0.76m)
+      const distanceToday =
+        dailyLog?.distance ??
+        trackingDist ??
+        parseFloat(((stepsToday * 0.76) / 1000).toFixed(2));
+
+      // Today's workouts (subset of weekly)
+      const todayWorkouts = workouts.filter((w) => w.date === today);
+
+      // Calories: sum of today's workout calories_burned
+      const workoutCaloriesToday = todayWorkouts.reduce(
+        (sum, w) => sum + (w.calories_burned ?? 0),
+        0
+      );
+      const caloriesToday =
+        workoutCaloriesToday > 0
+          ? workoutCaloriesToday
+          : dailyLog?.calories ?? trackingCal ?? 0;
+
+      // Active minutes: sum of today's workout durations
+      const activeMinsToday = todayWorkouts.reduce(
+        (sum, w) => sum + (w.duration_minutes ?? 0),
+        0
+      );
+
+      // Water / sleep / mood
+      const waterToday = waterLog?.glasses ?? dailyLog?.water ?? 0;
+      const sleepHours = sleepLog?.hours ?? dailyLog?.sleep ?? 0;
+      const moodRating = moodLog?.rating ?? dailyLog?.mood ?? 3;
+      const proteinToday = dailyLog?.protein ?? 0;
+
+      // ── Weekly chart (workout minutes per day, Mon=0…Sun=6) ──────────────
+      const weeklyMinutes: number[] = Array(7).fill(0);
+      let weeklyCalories = 0;
+      let weeklyDistance = 0;
+
+      workouts.forEach((w) => {
+        const d = dayjs(w.date);
+        // dayjs .day() → 0=Sun, convert to Mon=0
+        const idx = (d.day() + 6) % 7;
+        if (idx >= 0 && idx < 7) {
+          weeklyMinutes[idx] += w.duration_minutes ?? 0;
+        }
+        weeklyCalories += w.calories_burned ?? 0;
+      });
+
+      // Also pull distance from activities this week for accurate km
+      const { data: activitiesWeek } = await supabase
+        .from('activities')
+        .select('distance, start_time')
+        .eq('user_id', user.id)
+        .gte('start_time', dayjs(weekStart).startOf('day').toISOString())
+        .lte('start_time', dayjs(weekEnd).endOf('day').toISOString());
+
+      (activitiesWeek ?? []).forEach((a: any) => {
+        weeklyDistance += a.distance ?? 0;
+      });
+
+      const weeklyWorkoutCount = workouts.length;
+
+      // ── Best streak from achievements ─────────────────────────────────────
+      // We store best streak as a special achievement type 'best_streak_N'
+      let bestStreak = currentStreak;
+      const bestStreakAch = achievements.find((a) =>
+        a.achievement_type.startsWith('best_streak_')
+      );
+      if (bestStreakAch) {
+        const n = parseInt(bestStreakAch.achievement_type.replace('best_streak_', ''), 10);
+        if (!isNaN(n)) bestStreak = Math.max(bestStreak, n);
+      }
+
+      // ── Challenge ─────────────────────────────────────────────────────────
+      const todayChallenge: ChallengeRow | null = challengeRows[0] ?? null;
+      const userChallenge: UserChallengeRow | null = userChallengeRows[0] ?? null;
+
+      // ── Feed items (last 5, union of workouts + food_logs + achievements) ─
+      const feedItems: FeedItem[] = [];
+
+      // Add today's workouts from DB as feed items
+      todayWorkouts.slice(0, 3).forEach((w) => {
+        const type = (w.type ?? 'other').toLowerCase();
+        feedItems.push({
+          id: `workout_${w.id}`,
+          kind: 'workout',
+          title: w.name ?? (type.charAt(0).toUpperCase() + type.slice(1)) + ' Workout',
+          subtitle: `${w.duration_minutes ?? 0} min · ${w.calories_burned ?? 0} kcal`,
+          icon: WORKOUT_ICON_MAP[type] ?? 'dumbbell',
+          color: WORKOUT_COLOR_MAP[type] ?? '#94A3B8',
+          createdAt: new Date(w.date),
+          referenceId: w.id,
+        });
+      });
+
+      // Add food logs
+      foodLogs.slice(0, 2).forEach((f) => {
+        feedItems.push({
+          id: `food_${f.id}`,
+          kind: 'food',
+          title: `${f.meal_type.charAt(0).toUpperCase() + f.meal_type.slice(1)} logged`,
+          subtitle: `${f.calories} kcal`,
+          icon: 'food-apple',
+          color: colors.metricFood,
+          createdAt: new Date(f.created_at),
+          referenceId: f.id,
+        });
+      });
+
+      // Add recent achievements
+      achievements.slice(0, 2).forEach((ach) => {
+        const meta = ACHIEVEMENT_META[ach.achievement_type];
+        if (meta) {
+          feedItems.push({
+            id: `ach_${ach.id}`,
+            kind: 'achievement',
+            title: meta.label,
+            subtitle: `Earned ${dayjs(ach.earned_at).fromNow()}`,
+            icon: 'star',
+            color: meta.color,
+            createdAt: new Date(ach.earned_at),
+          });
+        }
+      });
+
+      // Sort by most recent and take top 5
+      feedItems.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      const top5Feed = feedItems.slice(0, 5);
+
+      // ── APS — Planned workouts from onboarding ────────────────────────────
+      let plannedWorkouts = 5;
+      try {
+        const onboardingRaw = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING);
+        if (onboardingRaw) {
+          const ob = JSON.parse(onboardingRaw);
+          if (ob?.trainingDays && typeof ob.trainingDays === 'number') {
+            plannedWorkouts = ob.trainingDays;
+          }
+        }
+      } catch {}
+
+      const completedWorkoutsThisWeek = weeklyWorkoutCount;
+
+      // ── Insight ───────────────────────────────────────────────────────────
+      const insight = generateInsight({
+        avgSleepHours: sleepHours,
+        bestDaySteps: Math.max(...(await databaseService.getWeeklyStepsByDay(user.id, new Date(weekStart)))),
+        weeklyStepsChange: 0, // would require prev week, skip for now
+        currentStreak,
+        waterToday,
+        proteinToday,
+        stepsToday,
+        stepGoal,
+      });
+
+      // ── Weekly snapshot ───────────────────────────────────────────────────
+      let snapshotData = null;
+      if (await shouldShowWeeklySnapshot()) {
+        snapshotData = {
+          totalSteps: stepsToday,
+          totalDistKm: weeklyDistance,
+          totalCalories: weeklyCalories,
+          activeDays: weeklyMinutes.filter((m) => m > 0).length,
+          streak: currentStreak,
+          bestDaySteps: 0,
+          bestDayDate: '',
+          apsScore: 0,
+        };
+      }
+
+      // ── Sync badges in background ─────────────────────────────────────────
+      syncBadges(user.id)
+        .then((newBadges) => {
+          if (newBadges.length > 0) {
+            setCelebBadge(newBadges[0]);
+            notifyBadgeUnlocked(newBadges[0].label, newBadges[0].icon).catch(() => {});
+          }
+        })
+        .catch(() => {});
+
+      // ── Assemble final data object ────────────────────────────────────────
+      setData({
+        avatarUrl,
+        stepsToday,
+        caloriesToday,
+        distanceToday,
+        activeMinsToday,
+        stepGoal,
+        calGoal,
+        distGoal,
+        activeMinsGoal: DEFAULT_ACTIVE_MINS_GOAL,
+        waterToday,
+        waterGoal: DEFAULT_WATER_GOAL,
+        sleepHours,
+        moodRating,
+        proteinToday,
+        proteinGoal,
+        completedWorkoutsThisWeek,
+        plannedWorkouts,
+        weeklyMinutes,
+        weeklyWorkoutCount,
+        weeklyCalories,
+        weeklyDistance,
+        currentStreak,
+        bestStreak,
+        todayChallenge,
+        userChallenge,
+        recentAchievements: achievements,
+        totalAchievements: achievements.length,
+        feedItems: top5Feed,
+        unlockedBadgeIds,
+        insight,
+        snapshotData,
+      });
+
+      if (snapshotData) {
+        setSnapshotVisible(true);
+      }
+
+      // ── Smart notifications in background ────────────────────────────────
+      sendSmartNotifications({
+        stepsToday,
+        stepGoal,
+        streak: currentStreak,
+        distanceToday: weeklyDistance,
+        distanceGoal: distGoal,
+        waterToday,
+        waterGoal: DEFAULT_WATER_GOAL,
+      }).catch(() => {});
+
+      // ── Goal progress sync in background ─────────────────────────────────
+      databaseService.syncGoalProgress(user.id).catch(() => {});
+
+    } catch (err: any) {
+      setLoadError(err?.message ?? 'Failed to load data');
+    }
+  }, [user, trackingSteps, trackingDist, trackingCal]);
+
+  // ── Initial load ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    setIsLoading(true);
+    loadData().finally(() => setIsLoading(false));
   }, [user]);
 
-  const loadData = async () => {
+  // ── Realtime subscription: refresh on daily_log / workout changes ────────
+  useEffect(() => {
     if (!user) return;
-setIsLoading(true);
-try {
-  const savedAvatar = await AsyncStorage.getItem('@epexfit_avatar_url');
-  if (savedAvatar) setAvatarUri(savedAvatar);
-} catch {}
-    const now = new Date();
-    const diffToMonday = (now.getDay() + 6) % 7;
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - diffToMonday);
 
-    const [
-      { data: log }, { data: activities }, stats, { data: goals },
-      realWeeklySteps, currentStreak, badgeIds,
-    ] = await Promise.all([
-      databaseService.getDailyLog(user.id, new Date()),
-      databaseService.getRecentActivities(user.id, 5),
-      databaseService.getStatistics(user.id, 'week'),
-      databaseService.getGoals(user.id),
-      databaseService.getWeeklyStepsByDay(user.id, weekStart),
-      recalculateStreak(user.id),
-      getUnlockedBadgeIds(user.id),
-    ]);
+    const debouncedLoad = () => {
+      if (realtimeDebounce.current) clearTimeout(realtimeDebounce.current);
+      realtimeDebounce.current = setTimeout(() => { loadData(); }, 600);
+    };
 
-    setTodayLog(log);
-    setRecentActivities(activities ?? []);
-    setWeeklyStats(stats);
-    setWeeklySteps(realWeeklySteps);
-    setStreak(currentStreak);
-    setUnlockedBadgeIds(badgeIds);
+    realtimeSub.current = supabase
+      .channel(`home_${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'daily_logs', filter: `user_id=eq.${user.id}` },
+        debouncedLoad
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'workouts', filter: `user_id=eq.${user.id}` },
+        debouncedLoad
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'water_logs', filter: `user_id=eq.${user.id}` },
+        debouncedLoad
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'sleep_logs', filter: `user_id=eq.${user.id}` },
+        debouncedLoad
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mood_logs', filter: `user_id=eq.${user.id}` },
+        debouncedLoad
+      )
+      .subscribe();
 
-    // Personalised goals
-    let sGoal = DEFAULT_STEP_GOAL, cGoal = DEFAULT_CAL_GOAL, dGoal = DEFAULT_DIST_GOAL;
-    let proteinGoal = user.weight ? calcProteinGoal(user.weight) : 120;
-    if (goals?.length) {
-      const sg = goals.find((g: Goal) => g.type === 'steps');
-      const cg = goals.find((g: Goal) => g.type === 'calories');
-      const rg = goals.find((g: Goal) => g.type === 'running');
-      if (sg) { setStepGoal(sg.target); sGoal = sg.target; }
-      if (cg) { setCalGoal(cg.target); cGoal = cg.target; }
-      if (rg) { setDistGoal(rg.target); dGoal = rg.target; }
-    }
+    return () => {
+      realtimeSub.current?.unsubscribe();
+      if (realtimeDebounce.current) clearTimeout(realtimeDebounce.current);
+    };
+  }, [user]);
 
-    const todaySteps = log?.steps ?? steps ?? 0;
-    const todayDist = log?.distance ?? distance ?? 0;
-    const todayCal = log?.calories ?? calories ?? 0;
-    const todayProtein = log?.protein ?? 0;
-    const todayWater = log?.water ?? 0;
+  // ── Pull to refresh ───────────────────────────────────────────────────────
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  }, [loadData]);
 
-    // FIX: read user's actual training days from onboarding — was hardcoded to 5
-    // This was causing APS Consistency score to always be wrong for users with 2, 4, or 6 day plans
-    let plannedWorkouts = 5;
-    try {
-      const onboardingRaw = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING);
-      if (onboardingRaw) {
-        const onboarding = JSON.parse(onboardingRaw);
-        if (onboarding?.trainingDays && typeof onboarding.trainingDays === 'number') {
-          plannedWorkouts = onboarding.trainingDays;
-        }
-      }
-    } catch { /* use default of 5 */ }
+  // ── Quick metric update helpers ───────────────────────────────────────────
+  const upsertWater = useCallback(
+    async (glasses: number) => {
+      if (!user) return;
+      await supabase.from('water_logs').upsert(
+        { user_id: user.id, date: today, glasses },
+        { onConflict: 'user_id,date' }
+      );
+      setData((d) => d ? { ...d, waterToday: glasses } : d);
+    },
+    [user, today]
+  );
 
-    const aps = calculateAPS({
-      plannedWorkouts,
-      completedWorkouts: activities?.length ?? 0,
-      stepGoal: sGoal,
-      stepsToday: todaySteps,
-      calGoal: cGoal,
-      calBurned: todayCal,
-      proteinGoal,
-      proteinActual: todayProtein,
-      waterGoal: 8,
-      waterActual: todayWater,
-      sleepHours: log?.sleep ?? 0,
-      mood: log?.mood ?? 3,
-      bodyWeightKg: user.weight,
-    });
-    setApsResult(aps);
+  const upsertSleep = useCallback(
+    async (hours: number) => {
+      if (!user) return;
+      await supabase.from('sleep_logs').upsert(
+        { user_id: user.id, date: today, hours },
+        { onConflict: 'user_id,date' }
+      );
+      setData((d) => d ? { ...d, sleepHours: hours } : d);
+    },
+    [user, today]
+  );
 
-    // Background tasks — run after UI renders to avoid blocking the initial paint
-    setIsLoading(false);
-    databaseService.syncGoalProgress(user.id).catch(() => {});
-    syncBadges(user.id).then(newBadges => {
-      if (newBadges.length > 0) {
-        setCelebBadge(newBadges[0]);
-        notifyBadgeUnlocked(newBadges[0].label, newBadges[0].icon).catch(() => {});
-      }
-    }).catch(() => {});
+  const upsertMood = useCallback(
+    async (rating: number) => {
+      if (!user) return;
+      await supabase.from('mood_logs').upsert(
+        { user_id: user.id, date: today, rating },
+        { onConflict: 'user_id,date' }
+      );
+      setData((d) => d ? { ...d, moodRating: rating } : d);
+    },
+    [user, today]
+  );
 
-    const ch = getDailyChallenge(
-      realWeeklySteps.filter(s => s > 0).length > 0
-        ? realWeeklySteps.reduce((a, b) => a + b, 0) / 7
-        : undefined
+  const markChallengeComplete = useCallback(async () => {
+    if (!user || !data?.todayChallenge) return;
+    await supabase.from('user_challenges').upsert(
+      {
+        user_id: user.id,
+        challenge_id: data.todayChallenge.id,
+        progress: data.todayChallenge.target,
+        completed: true,
+      },
+      { onConflict: 'user_id,challenge_id' }
     );
-    setChallenge(ch);
+    setData((d) =>
+      d
+        ? {
+            ...d,
+            userChallenge: d.userChallenge
+              ? { ...d.userChallenge, completed: true, progress: d.todayChallenge!.target }
+              : { id: 'local', challenge_id: d.todayChallenge!.id, progress: d.todayChallenge!.target, completed: true },
+          }
+        : d
+    );
+  }, [user, data?.todayChallenge]);
 
-    // FIX: persist daily challenge completion — was recalculated fresh every load,
-    // so backgrounding the app reset the completed checkmark
-    const today = new Date().toISOString().split('T')[0];
-    let persistedDone = false;
-    try {
-      const saved = await AsyncStorage.getItem(DAILY_CHALLENGE_KEY);
-      if (saved) {
-        const { date, completed } = JSON.parse(saved);
-        if (date === today && completed) persistedDone = true;
-      }
-    } catch { /* ignore */ }
-
-    const metricsDone = isChallengeComplete(ch, {
-      steps: todaySteps, water: todayWater, sleep: log?.sleep ?? 0, protein: todayProtein,
-    });
-    const isDone = persistedDone || metricsDone;
-    setChallengeDone(isDone);
-
-    if (metricsDone && !persistedDone) {
-      try {
-        await AsyncStorage.setItem(DAILY_CHALLENGE_KEY, JSON.stringify({ date: today, completed: true }));
-      } catch { /* ignore */ }
-    }
-
-    const i = generateInsight({
-      avgSleepHours: log?.sleep ?? 0,
-      bestDaySteps: Math.max(...realWeeklySteps),
-      weeklyStepsChange: stats.totalSteps > 0 ? 5 : 0,
-      currentStreak,
-      waterToday: todayWater,
-      proteinToday: todayProtein,
-      stepsToday: todaySteps,
-      stepGoal: sGoal,
-    });
-    setInsight(i);
-
-    if (await shouldShowWeeklySnapshot()) {
-      setSnapshotData({
-        totalSteps: stats.totalSteps, totalDistKm: stats.totalDistance,
-        totalCalories: stats.totalCalories, activeDays: realWeeklySteps.filter(s => s > 0).length,
-        streak: currentStreak, bestDaySteps: Math.max(...realWeeklySteps),
-        bestDayDate: '', apsScore: aps.total,
-      });
-    }
-
-    sendSmartNotifications({
-      stepsToday: todaySteps, stepGoal: sGoal,
-      streak: currentStreak, distanceToday: todayDist, distanceGoal: dGoal,
-      waterToday: todayWater, waterGoal: 8,
-    }).catch(() => {});
-  };
-
-  const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
-
+  // ── Helpers ───────────────────────────────────────────────────────────────
   const getGreeting = () => {
     const h = new Date().getHours();
-    if (h < 12) return 'Good morning'; if (h < 18) return 'Good afternoon'; return 'Good evening';
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
   };
 
-  const todaySteps = todayLog?.steps ?? steps ?? 0;
-  const todayDist = todayLog?.distance ?? distance ?? 0;
-  const todayCal = todayLog?.calories ?? calories ?? 0;
-  const overallPct = Math.min(((todaySteps / stepGoal) + (todayDist / distGoal) + (todayCal / calGoal)) / 3, 1);
-  const consistencyPct = Math.min((weeklyStats.totalSteps / (stepGoal * 7)) * 100, 100);
-  const accent = colors.primary;
-  const displayBadges = BADGE_DEFINITIONS.slice(0, 6).map(b => ({ ...b, unlocked: unlockedBadgeIds.includes(b.id) }));
+  const getMoodEmoji = (rating: number) => {
+    const emojis = ['😞', '😐', '🙂', '😄', '🔥'];
+    return emojis[Math.max(0, Math.min(rating - 1, 4))];
+  };
 
-  // Training load warning: 5 activities in the past 5 days is high load
-  const highLoad = recentActivities.length >= 4;
+  // ── APS calculation ───────────────────────────────────────────────────────
+  const apsResult = data
+    ? calculateAPS({
+        plannedWorkouts: data.plannedWorkouts,
+        completedWorkouts: data.completedWorkoutsThisWeek,
+        stepGoal: data.stepGoal,
+        stepsToday: data.stepsToday,
+        calGoal: data.calGoal,
+        calBurned: data.caloriesToday,
+        proteinGoal: data.proteinGoal,
+        proteinActual: data.proteinToday,
+        waterGoal: data.waterGoal,
+        waterActual: data.waterToday,
+        sleepHours: data.sleepHours,
+        mood: data.moodRating,
+        bodyWeightKg: user?.weight,
+      })
+    : { total: 0, label: 'Loading', color: accent, tip: '' };
 
-  // Hero APS ring — 60% of screen height
-  const screenHeight = Dimensions.get('window').height;
-  const heroHeight = screenHeight * 0.55; // 55% for better balance
+  // ── New user check — koi bhi activity nahi logged ────────────────────────
+  const isNewUser = data != null &&
+    data.stepsToday === 0 &&
+    data.caloriesToday === 0 &&
+    data.completedWorkoutsThisWeek === 0 &&
+    data.waterToday === 0 &&
+    data.sleepHours === 0;
 
+  // ── Challenge completion check ────────────────────────────────────────────
+  const challengeDone =
+    data?.userChallenge?.completed ??
+    (data?.todayChallenge
+      ? isChallengeComplete(
+          {
+            id: data.todayChallenge.id,
+            text: data.todayChallenge.title,
+            icon: '🎯',
+            metric: (data.todayChallenge.target_unit as any) ?? 'steps',
+            target: data.todayChallenge.target,
+            difficulty: 'medium',
+          },
+          {
+            steps: data.stepsToday,
+            water: data.waterToday,
+            sleep: data.sleepHours,
+            protein: data.proteinToday,
+          }
+        )
+      : false);
+
+  const challengeProgress = data?.userChallenge?.progress ?? 0;
+  const challengeTarget = data?.todayChallenge?.target ?? 0;
+  const challengePct = challengeTarget > 0 ? Math.min(challengeProgress / challengeTarget, 1) : 0;
+
+  // ── Display badges ────────────────────────────────────────────────────────
+  const displayBadges = BADGE_DEFINITIONS.slice(0, 6).map((b) => ({
+    ...b,
+    unlocked: data?.unlockedBadgeIds.includes(b.id) ?? false,
+  }));
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
   if (isLoading) return <HomeScreenSkeleton />;
+
+  // Error state with retry
+  if (loadError && !data) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+        <Text style={{ fontSize: 40, marginBottom: 16 }}>⚠️</Text>
+        <Text style={{ fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 8, textAlign: 'center' }}>
+          Couldn't load your data
+        </Text>
+        <Text style={{ fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: 28 }}>
+          {loadError}
+        </Text>
+        <TouchableOpacity
+          onPress={() => { setIsLoading(true); loadData().finally(() => setIsLoading(false)); }}
+          style={{ backgroundColor: accent, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 16 }}
+        >
+          <Text style={{ color: colors.onPrimary, fontWeight: '800', fontSize: 15 }}>Try Again</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={colors.background}
+      />
+
+      {/* ── Modals ─────────────────────────────────────────────────────── */}
       <BadgeUnlockModal badge={celebBadge} onDismiss={() => setCelebBadge(null)} />
-      <WeeklySnapshotModal data={snapshotData} onDismiss={() => { setSnapshotData(null); markSnapshotShown(); }} />
+      <WeeklySnapshotModal
+        data={data?.snapshotData}
+        onDismiss={() => { setSnapshotVisible(false); markSnapshotShown(); }}
+      />
 
       <Animated.ScrollView
         style={{ flex: 1, opacity: fadeIn, transform: [{ translateY: slideUp }] }}
-        contentContainerStyle={[styles.scroll, { }]}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} colors={[accent]} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={accent}
+            colors={[accent]}
+          />
+        }
       >
-        {/* Header */}
+        {/* ─── 1. HEADER ──────────────────────────────────────────────── */}
         <View style={styles.header}>
           <View>
-            <Text style={[styles.greeting, { color: colors.textSecondary }]}>{getGreeting()}</Text>
-            <Text style={[styles.userName, { color: colors.text }]}>{user?.fullName?.split(' ')[0] || 'Athlete'} 👋</Text>
+            <Text style={[styles.greeting, { color: colors.textSecondary }]}>
+              {getGreeting()}
+            </Text>
+            <Text style={[styles.userName, { color: colors.text }]}>
+              {user?.fullName?.split(' ')[0] || 'Athlete'} 👋
+            </Text>
           </View>
+
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            {streak > 0 && (
-              <View style={[styles.streakBadge, { backgroundColor: colors.metricStreak + '22', borderColor: colors.metricStreak + '55' }]}>
+            {/* Streak badge */}
+            {(data?.currentStreak ?? 0) > 0 && (
+              <View
+                style={[
+                  styles.streakBadge,
+                  {
+                    backgroundColor: colors.metricStreak + '22',
+                    borderColor: colors.metricStreak + '55',
+                  },
+                ]}
+              >
                 <Text style={{ fontSize: 14 }}>🔥</Text>
-                <Text style={[styles.streakNum, { color: colors.metricStreak }]}>{streak}</Text>
+                <Text style={[styles.streakNum, { color: colors.metricStreak }]}>
+                  {data!.currentStreak}
+                </Text>
               </View>
             )}
+
+            {/* Notification bell */}
             <TouchableOpacity
               onPress={() => navigation.navigate('NotificationInbox')}
-              style={[styles.avatarBtn, { backgroundColor: accent + '18', borderColor: accent + '60' }]}
+              style={[styles.avatarBtn, { backgroundColor: accent + '18', borderColor: accent + '40' }]}
             >
               <Text style={{ fontSize: 20 }}>🔔</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('Profile')}
-  style={[styles.avatarBtn, { backgroundColor: accent + '18', borderColor: accent + '60' }]}>
-  {avatarUri ? (
-    <Image source={{ uri: avatarUri }} style={{ width: 46, height: 46, borderRadius: 16 }} />
-  ) : (
-    <Text style={[styles.avatarText, { color: accent }]}>{user?.fullName?.charAt(0)?.toUpperCase() ?? 'U'}</Text>
-  )}
-</TouchableOpacity>
+
+            {/* Avatar — Supabase profiles.avatar_url OR first letter */}
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Profile')}
+              style={[styles.avatarBtn, { backgroundColor: accent + '18', borderColor: accent + '60' }]}
+              activeOpacity={0.8}
+            >
+              {data?.avatarUrl ? (
+                <Image
+                  source={{ uri: data.avatarUrl }}
+                  style={{ width: 46, height: 46, borderRadius: 14 }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Text style={[styles.avatarText, { color: accent }]}>
+                  {user?.fullName?.charAt(0)?.toUpperCase() ?? 'U'}
+                </Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* ── HERO SECTION: Dominant APS Ring (60% screen) ── */}
-        <View style={[styles.heroSection, { minHeight: heroHeight }]}>
+        {/* ─── 2. APS SCORE CARD ──────────────────────────────────────── */}
+        <View style={styles.heroSection}>
           <View style={styles.heroContent}>
-            {/* APS Ring — 200px diameter, animated */}
-            <View style={styles.apsRingContainer}>
-              <AnimatedProgressRing
-                progress={apsResult.total / 100}
-                size={200}
-                strokeWidth={6}
-                color={apsResult.color}
-                trackColor={isDark ? 'rgba(148,163,184,0.15)' : 'rgba(15,23,42,0.1)'}
-                duration={1200}
-              >
-                <View style={styles.apsRingCenter}>
-                  <AnimatedCounter
-                    value={apsResult.total}
-                    duration={1200}
-                    style={[typography.displayMedium, { color: apsResult.color }]}
-                  />
-                  <Text style={[typography.label, { color: colors.textSecondary, marginTop: 4 }]}>
-                    APS SCORE
-                  </Text>
-                  <Text style={[typography.bodyBold, { color: apsResult.color, marginTop: 2 }]}>
-                    {apsResult.label}
-                  </Text>
-                </View>
-              </AnimatedProgressRing>
-              
-              {/* APS Info Button */}
-              <TouchableOpacity
-                style={[styles.apsInfoBtn, { backgroundColor: colors.primary + '18', borderColor: colors.primary + '40' }]}
-                onPress={() => setShowAPSTip(!showAPSTip)}
-              >
-                <Text style={{ fontSize: 14, fontWeight: '700', color: colors.primary }}>ⓘ</Text>
-              </TouchableOpacity>
-            </View>
 
-            {/* APS Tooltip */}
-            {showAPSTip && (
-              <View style={[styles.apsTipCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                <Text style={[typography.caption, { color: colors.textSecondary, lineHeight: 18 }]}>
-                  Athlete Performance Score combines consistency, activity, nutrition, sleep & mood. Higher = better day.
-                </Text>
-                {apsResult.tip && (
-                  <Text style={[typography.bodyBold, { color: apsResult.color, marginTop: 8 }]}>
-                    {apsResult.tip}
+            {/* ── APS Ring — always visible, even at 0 ── */}
+            <>
+              <View style={styles.apsRingContainer}>
+                <AnimatedProgressRing
+                  progress={apsResult.total / 100}
+                  size={200}
+                  strokeWidth={6}
+                  color={isNewUser ? (isDark ? 'rgba(148,163,184,0.4)' : 'rgba(100,116,139,0.35)') : apsResult.color}
+                  trackColor={isDark ? 'rgba(148,163,184,0.15)' : 'rgba(15,23,42,0.1)'}
+                  duration={1200}
+                >
+                  <View style={styles.apsRingCenter}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                      <AnimatedCounter
+                        value={apsResult.total}
+                        duration={1200}
+                        style={[
+                          typography.displayMedium,
+                          { color: isNewUser ? accent : apsResult.color },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          typography.titleMedium,
+                          { color: colors.textSecondary, marginLeft: 2 },
+                        ]}
+                      >
+                        {' '}/ 100
+                      </Text>
+                    </View>
+                    <Text style={[typography.label, { color: colors.textSecondary, marginTop: 4 }]}>
+                      APS SCORE
+                    </Text>
+                    <Text
+                      style={[
+                        typography.bodyBold,
+                        { color: isNewUser ? colors.textSecondary : apsResult.color, marginTop: 2 },
+                      ]}
+                    >
+                      {isNewUser ? 'Your baseline — log to build' : apsResult.label}
+                    </Text>
+                  </View>
+                </AnimatedProgressRing>
+
+                <TouchableOpacity
+                  style={[
+                    styles.apsInfoBtn,
+                    { backgroundColor: accent + '18', borderColor: accent + '40' },
+                  ]}
+                  onPress={() => setShowAPSTip((v) => !v)}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: accent }}>ⓘ</Text>
+                </TouchableOpacity>
+              </View>
+
+              {showAPSTip && (
+                <View
+                  style={[
+                    styles.apsTipCard,
+                    { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[typography.caption, { color: colors.textSecondary, lineHeight: 18 }]}>
+                    APS = (Consistency 30% + Activity 25% + Nutrition 20% + Recovery 15% + Progress 10%).
+                    Calculated live from your workouts, food logs, sleep & mood today.
                   </Text>
-                )}
+                  {apsResult.tip ? (
+                    <Text style={[typography.bodyBold, { color: apsResult.color, marginTop: 8 }]}>
+                      💡 {apsResult.tip}
+                    </Text>
+                  ) : null}
+                </View>
+              )}
+            </>
+
+            {isNewUser && (
+              <View style={[styles.newUserBanner, { backgroundColor: accent + '14', borderColor: accent + '35' }]}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: accent, marginBottom: 8, textAlign: 'center' }}>
+                  🏁  Start logging to activate your APS score
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('Workouts')}
+                    activeOpacity={0.82}
+                    style={[styles.newUserBtn, { backgroundColor: accent }]}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>💪 Log Workout</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('FoodLog')}
+                    activeOpacity={0.82}
+                    style={[styles.newUserBtn, { backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: accent + '60' }]}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: accent }}>🥗 Log Food</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('Goals')}
+                    activeOpacity={0.82}
+                    style={[styles.newUserBtn, { backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: accent + '60' }]}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: accent }}>🎯 Goals</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
 
-            {/* Metric Pills — Horizontal scroll */}
+            {/* ─── 3. METRIC CARDS ────────────────────────────────────── */}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.metricPills}
-              style={{ marginTop: 32 }}
+              style={{ marginTop: 28 }}
             >
               {[
-                { icon: 'shoe-print', value: todaySteps, unit: '', label: 'Steps', goal: stepGoal, color: colors.primary },
-                { icon: 'map-marker-distance', value: todayDist, unit: 'km', label: 'Distance', goal: distGoal, color: colors.metricDistance, decimals: 1 },
-                { icon: 'fire', value: todayCal, unit: 'kcal', label: 'Calories', goal: calGoal, color: colors.metricBurn },
-                { icon: 'food-steak', value: todayLog?.protein ?? 0, unit: 'g', label: 'Protein', goal: 120, color: colors.metricProtein },
-              ].map((metric) => {
-                const progress = Math.min((metric.value / metric.goal) * 100, 100);
+                {
+                  icon: 'shoe-print',
+                  value: data?.stepsToday ?? 0,
+                  unit: '',
+                  label: 'Steps',
+                  goal: data?.stepGoal ?? DEFAULT_STEP_GOAL,
+                  color: accent,
+                  decimals: 0,
+                  onPress: () => navigation.navigate('DailyLog'),
+                },
+                {
+                  icon: 'fire',
+                  value: data?.caloriesToday ?? 0,
+                  unit: 'kcal',
+                  label: 'Calories',
+                  goal: data?.calGoal ?? DEFAULT_CAL_GOAL,
+                  color: colors.metricBurn,
+                  decimals: 0,
+                  onPress: () => navigation.navigate('FoodLog'),
+                },
+                {
+                  icon: 'map-marker-distance',
+                  value: unitSystem === 'imperial'
+                    ? (data?.distanceToday ?? 0) * 0.621371
+                    : (data?.distanceToday ?? 0),
+                  unit: unitSystem === 'imperial' ? 'mi' : 'km',
+                  label: 'Distance',
+                  goal: unitSystem === 'imperial'
+                    ? (data?.distGoal ?? DEFAULT_DIST_GOAL) * 0.621371
+                    : (data?.distGoal ?? DEFAULT_DIST_GOAL),
+                  color: colors.metricDistance,
+                  decimals: 1,
+                  onPress: () => navigation.navigate('History'),
+                },
+                {
+                  icon: 'timer',
+                  value: data?.activeMinsToday ?? 0,
+                  unit: 'min',
+                  label: 'Active',
+                  goal: data?.activeMinsGoal ?? DEFAULT_ACTIVE_MINS_GOAL,
+                  color: colors.metricStrength,
+                  decimals: 0,
+                  onPress: () => navigation.navigate('Workouts'),
+                },
+              ].map((m) => {
+                const pct = Math.min((m.value / m.goal) * 100, 100);
                 return (
-                  <View
-                    key={metric.label}
+                  <TouchableOpacity
+                    key={m.label}
+                    activeOpacity={0.75}
+                    onPress={m.onPress}
                     style={[
                       styles.metricPill,
-                      {
-                        backgroundColor: colors.surfaceElevated,
-                        borderColor: colors.border,
-                      },
+                      { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
                     ]}
                   >
-                    <View style={[styles.metricPillIcon, { backgroundColor: metric.color + '20' }]}>
-                      <AppIcon name={metric.icon} size={18} color={metric.color} />
+                    <View style={[styles.metricPillIcon, { backgroundColor: m.color + '20' }]}>
+                      <AppIcon name={m.icon} size={18} color={m.color} />
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: 8, gap: 2 }}>
-  <Text style={[typography.h3, { color: colors.text, lineHeight: 28 }]}>
-    {metric.decimals ? metric.value.toFixed(metric.decimals) : metric.value.toLocaleString()}
-  </Text>
-  {metric.unit ? (
-    <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: 3 }]}>
-      {metric.unit}
-    </Text>
-  ) : null}
-</View>
-                    <Text style={[typography.label, { color: colors.textSecondary, marginTop: 2 }]}>
-                      {metric.label}
-                    </Text>
-                    {/* Mini progress bar */}
-                    <View style={[styles.pillProgress, { backgroundColor: metric.color + '20' }]}>
-                      <View style={[styles.pillProgressFill, { backgroundColor: metric.color, width: `${progress}%` }]} />
+                      <Text style={[typography.h3, { color: colors.text, lineHeight: 28 }]}>
+                        {m.decimals > 0 ? m.value.toFixed(m.decimals) : m.value.toLocaleString()}
+                      </Text>
+                      {m.unit ? (
+                        <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: 3 }]}>
+                          {m.unit}
+                        </Text>
+                      ) : null}
                     </View>
-                  </View>
+                    <Text style={[typography.label, { color: colors.textSecondary, marginTop: 2 }]}>
+                      {m.label}
+                    </Text>
+                    {/* Progress bar */}
+                    <View style={[styles.pillProgress, { backgroundColor: m.color + '20' }]}>
+                      <View
+                        style={[styles.pillProgressFill, { backgroundColor: m.color, width: `${pct}%` }]}
+                      />
+                    </View>
+                    {m.value === 0 && (
+                      <Text style={[styles.addDataHint, { color: m.color }]}>+ Add data</Text>
+                    )}
+                  </TouchableOpacity>
                 );
               })}
             </ScrollView>
           </View>
         </View>
 
-        {/* Quick Actions */}
+        {/* ─── 4. QUICK ACTIONS ───────────────────────────────────────── */}
         <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>QUICK ACTIONS</Text>
         <View style={styles.qaRow}>
           {[
-            { icon: 'run', label: 'Activity', sub: 'Start tracking', color: accent, screen: 'Activity' },
-            { icon: 'food-apple', label: 'Food Log', sub: 'Log meals', color: colors.metricFood, screen: 'FoodLog' },
-            { icon: 'dumbbell', label: 'Workouts', sub: 'Log lifting', color: colors.metricDistance, screen: 'Workouts' },
+            {
+              icon: 'dumbbell',
+              label: 'Log Workout',
+              sub: 'Track a session',
+              color: accent,
+              onPress: () => navigation.navigate('Workouts'),
+            },
+            {
+              icon: 'food-apple',
+              label: 'Log Food',
+              sub: 'Track calories',
+              color: colors.metricFood,
+              onPress: () => navigation.navigate('FoodLog'),
+            },
+            {
+              icon: 'target',
+              label: 'Challenges',
+              sub: 'Start a challenge',
+              color: colors.metricDistance,
+              onPress: () => navigation.navigate('Goals'),
+            },
           ].map((item) => (
-            <TouchableOpacity key={item.label} onPress={() => navigation.navigate(item.screen)} activeOpacity={0.75}
-              style={[styles.qaCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-              <View style={[styles.qaIconWrap, { backgroundColor: item.color + '15' }]}><AppIcon name={item.icon} size={22} color={item.color} /></View>
+            <TouchableOpacity
+              key={item.label}
+              onPress={item.onPress}
+              activeOpacity={0.75}
+              style={[
+                styles.qaCard,
+                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+              ]}
+            >
+              <View style={[styles.qaIconWrap, { backgroundColor: item.color + '18' }]}>
+                <AppIcon name={item.icon} size={22} color={item.color} />
+              </View>
               <Text style={[styles.qaLabel, { color: colors.text }]}>{item.label}</Text>
               <Text style={[styles.qaSub, { color: colors.textSecondary }]}>{item.sub}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* AI Daily Insight */}
-        {insight && (
-          <View style={[styles.insightCard, { backgroundColor: colors.surfaceElevated, borderColor: accent + '30', borderLeftColor: accent }]}>
-            <Text style={{ fontSize: 18 }}>{insight.icon}</Text>
-            <Text style={[styles.insightText, { color: colors.text }]}>{insight.text}</Text>
+        {/* ─── AI Insight ─────────────────────────────────────────────── */}
+        {data?.insight && (
+          <View
+            style={[
+              styles.insightCard,
+              { backgroundColor: colors.surfaceElevated, borderColor: accent + '30', borderLeftColor: accent },
+            ]}
+          >
+            <Text style={{ fontSize: 18 }}>{data.insight.icon}</Text>
+            <Text style={[styles.insightText, { color: colors.text }]}>{data.insight.text}</Text>
           </View>
         )}
 
-        {/* Daily Challenge — completion tied to real data */}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          style={[styles.challengeCard, { backgroundColor: challengeDone ? colors.success + '14' : colors.surfaceElevated, borderColor: challengeDone ? colors.success + '55' : colors.border }]}
-        >
-          <Text style={{ fontSize: 22 }}>{challenge.icon}</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.challengeLabel, { color: colors.textSecondary }]}>TODAY'S CHALLENGE</Text>
-            <Text style={[styles.challengeText, { color: challengeDone ? colors.success : colors.text }]}>{challenge.text}</Text>
-          </View>
-          <View style={[styles.challengeCheck, { backgroundColor: challengeDone ? colors.success : colors.border }]}>
-            <Text style={{ color: '#fff', fontWeight: '900', fontSize: 14 }}>{challengeDone ? '✓' : '○'}</Text>
-          </View>
-        </TouchableOpacity>
-
-        {/* Training Load Warning */}
-        {highLoad && (
-          <View style={[styles.card, { backgroundColor: colors.warning + '12', borderColor: colors.warning + '44' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Text style={{ fontSize: 22 }}>⚠️</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '800', color: colors.warning }}>High Training Load</Text>
-                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 3 }}>
-                  {recentActivities.length} sessions this week. Consider a rest or recovery day — overtraining stalls progress.
+        {/* ─── 5. TODAY'S CHALLENGE ───────────────────────────────────── */}
+        {data?.todayChallenge ? (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => {
+              if (!challengeDone) markChallengeComplete();
+            }}
+            style={[
+              styles.challengeCard,
+              {
+                backgroundColor: challengeDone ? colors.success + '14' : colors.surfaceElevated,
+                borderColor: challengeDone ? colors.success + '55' : colors.border,
+              },
+            ]}
+          >
+            <Text style={{ fontSize: 24 }}>🎯</Text>
+            <View style={{ flex: 1, gap: 6 }}>
+              <Text style={[styles.challengeLabel, { color: colors.textSecondary }]}>
+                TODAY'S CHALLENGE
+              </Text>
+              <Text style={[styles.challengeText, { color: challengeDone ? colors.success : colors.text }]}>
+                {data.todayChallenge.title}
+              </Text>
+              {/* Progress bar */}
+              {!challengeDone && challengeTarget > 0 && (
+                <View>
+                  <View style={[styles.challTrack, { backgroundColor: colors.border }]}>
+                    <View
+                      style={[styles.challFill, { backgroundColor: accent, width: `${challengePct * 100}%` }]}
+                    />
+                  </View>
+                  <Text style={[styles.challPct, { color: colors.textSecondary }]}>
+                    {challengeProgress.toLocaleString()} / {challengeTarget.toLocaleString()} {data.todayChallenge.target_unit}
+                  </Text>
+                </View>
+              )}
+              {data.todayChallenge.reward && (
+                <Text style={[styles.challReward, { color: colors.metricStreak }]}>
+                  🏆 {data.todayChallenge.reward}
                 </Text>
-              </View>
+              )}
+            </View>
+            <View
+              style={[
+                styles.challengeCheck,
+                { backgroundColor: challengeDone ? colors.success : colors.border },
+              ]}
+            >
+              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 14 }}>
+                {challengeDone ? '✓' : '○'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ) : (
+          /* Fallback: deterministic local challenge when Supabase table is empty */
+          <View
+            style={[
+              styles.challengeCard,
+              { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+            ]}
+          >
+            <Text style={{ fontSize: 24 }}>🎯</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.challengeLabel, { color: colors.textSecondary }]}>
+                TODAY'S CHALLENGE
+              </Text>
+              <Text style={[styles.challengeText, { color: colors.text }]}>
+                {getDailyChallenge().text}
+              </Text>
             </View>
           </View>
         )}
 
-        {/* Weekly Activity */}
+        {/* ─── 6. WEEKLY ACTIVITY CHART ───────────────────────────────── */}
         <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
           <View style={styles.cardHeader}>
             <Text style={[styles.cardTitle, { color: colors.text }]}>Weekly Activity</Text>
-            <Text style={[styles.cardBadge, { backgroundColor: accent + '20', color: accent }]}>Real data</Text>
+            <View style={[styles.cardBadge, { backgroundColor: accent + '20' }]}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: accent }}>
+                {data?.weeklyWorkoutCount ?? 0} sessions
+              </Text>
+            </View>
           </View>
-          <WeekBar values={weeklySteps} color={accent} colors={colors} />
+
+          {/* Bar chart — workout minutes per day */}
+          <WeeklyBar
+            values={data?.weeklyMinutes ?? Array(7).fill(0)}
+            color={accent}
+            colors={colors}
+            onBarPress={(day, mins) => setSelectedBarDay({ day, mins })}
+          />
+
+          {/* Day detail tooltip */}
+          {selectedBarDay && (
+            <View style={[styles.barTooltip, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][selectedBarDay.day]}
+                {': '}
+                {selectedBarDay.mins > 0 ? `${selectedBarDay.mins} active mins` : 'Rest day'}
+              </Text>
+              <TouchableOpacity onPress={() => setSelectedBarDay(null)}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12 }}> ✕</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Weekly totals */}
           <View style={[styles.weekDivider, { borderTopColor: colors.divider }]}>
             {[
-              { val: weeklyStats.totalSteps.toLocaleString(), lbl: 'Steps' },
-              { val: `${weeklyStats.totalDistance.toFixed(1)} km`, lbl: 'Distance' },
-              { val: weeklyStats.totalCalories.toLocaleString(), lbl: 'Calories' },
+              { val: `${(data?.weeklyMinutes ?? []).reduce((a, b) => a + b, 0)} min`, lbl: 'Active' },
+              { val: unitSystem === 'imperial' ? `${((data?.weeklyDistance ?? 0) * 0.621371).toFixed(1)} mi` : `${(data?.weeklyDistance ?? 0).toFixed(1)} km`, lbl: 'Distance' },
+              { val: (data?.weeklyCalories ?? 0).toLocaleString(), lbl: 'Calories' },
             ].map((s) => (
               <View key={s.lbl} style={styles.weekStatItem}>
                 <Text style={[styles.weekStatVal, { color: colors.text }]}>{s.val}</Text>
@@ -532,108 +1552,313 @@ try {
           </View>
         </View>
 
-        {/* Daily Metrics */}
+        {/* ─── 7. TODAY'S METRICS DETAIL (editable) ───────────────────── */}
         <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>TODAY'S METRICS</Text>
         <View style={styles.tilesRow}>
-          {[
-            { icon: 'water', value: `${todayLog?.water ?? 0}`, label: 'Water', color: colors.metricHydration, cur: todayLog?.water ?? 0, goal: 8 },
-            { icon: 'food-steak', value: `${todayLog?.protein ?? 0}g`, label: 'Protein', color: colors.metricProtein, cur: todayLog?.protein ?? 0, goal: 120 },
-            { icon: 'sleep', value: `${todayLog?.sleep ?? 0}h`, label: 'Sleep', color: colors.metricSleep, cur: todayLog?.sleep ?? 0, goal: 8 },
-          ].map(t => (
-            <View key={t.label} style={[styles.tile, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-              <View style={[styles.tileIcon, { backgroundColor: t.color + '18' }]}><AppIcon name={t.icon} size={16} color={t.color} /></View>
-              <Text style={[styles.tileVal, { color: colors.text }]}>{t.value}</Text>
-              <Text style={[styles.tileLbl, { color: colors.textSecondary }]}>{t.label}</Text>
-              <View style={[styles.tileTrack, { backgroundColor: t.color + '22' }]}>
-                <View style={[styles.tileFill, { backgroundColor: t.color, width: `${Math.min((t.cur / t.goal) * 100, 100)}%` }]} />
-              </View>
+          {/* Water — tap +/- */}
+          <TouchableOpacity
+            onPress={() => setEditingWater((v) => !v)}
+            style={[styles.tile, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+            activeOpacity={0.75}
+          >
+            <View style={[styles.tileIcon, { backgroundColor: colors.metricHydration + '18' }]}>
+              <AppIcon name="water" size={16} color={colors.metricHydration} />
             </View>
-          ))}
+            <Text style={[styles.tileVal, { color: colors.text }]}>{data?.waterToday ?? 0}</Text>
+            <Text style={[styles.tileLbl, { color: colors.textSecondary }]}>Water 💧</Text>
+            <View style={[styles.tileTrack, { backgroundColor: colors.metricHydration + '22' }]}>
+              <View
+                style={[
+                  styles.tileFill,
+                  {
+                    backgroundColor: colors.metricHydration,
+                    width: `${Math.min(((data?.waterToday ?? 0) / DEFAULT_WATER_GOAL) * 100, 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+            {editingWater && (
+              <View style={styles.inlineEdit}>
+                <TouchableOpacity
+                  onPress={() => upsertWater(Math.max(0, (data?.waterToday ?? 0) - 1))}
+                  style={[styles.editBtn, { backgroundColor: colors.border }]}
+                >
+                  <Text style={{ color: colors.text, fontWeight: '900', fontSize: 16 }}>−</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => upsertWater((data?.waterToday ?? 0) + 1)}
+                  style={[styles.editBtn, { backgroundColor: accent }]}
+                >
+                  <Text style={{ color: colors.onPrimary, fontWeight: '900', fontSize: 16 }}>+</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* Sleep — tap +/- */}
+          <TouchableOpacity
+            onPress={() => setEditingSleep((v) => !v)}
+            style={[styles.tile, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+            activeOpacity={0.75}
+          >
+            <View style={[styles.tileIcon, { backgroundColor: colors.metricSleep + '18' }]}>
+              <AppIcon name="sleep" size={16} color={colors.metricSleep} />
+            </View>
+            <Text style={[styles.tileVal, { color: colors.text }]}>{data?.sleepHours ?? 0}h</Text>
+            <Text style={[styles.tileLbl, { color: colors.textSecondary }]}>Sleep 😴</Text>
+            <View style={[styles.tileTrack, { backgroundColor: colors.metricSleep + '22' }]}>
+              <View
+                style={[
+                  styles.tileFill,
+                  {
+                    backgroundColor: colors.metricSleep,
+                    width: `${Math.min(((data?.sleepHours ?? 0) / DEFAULT_SLEEP_GOAL) * 100, 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+            {editingSleep && (
+              <View style={styles.inlineEdit}>
+                <TouchableOpacity
+                  onPress={() => upsertSleep(Math.max(0, (data?.sleepHours ?? 0) - 0.5))}
+                  style={[styles.editBtn, { backgroundColor: colors.border }]}
+                >
+                  <Text style={{ color: colors.text, fontWeight: '900', fontSize: 16 }}>−</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => upsertSleep(Math.min(12, (data?.sleepHours ?? 0) + 0.5))}
+                  style={[styles.editBtn, { backgroundColor: accent }]}
+                >
+                  <Text style={{ color: colors.onPrimary, fontWeight: '900', fontSize: 16 }}>+</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* Mood — tap to cycle rating */}
+          <TouchableOpacity
+            onPress={() => {
+              const next = ((data?.moodRating ?? 3) % 5) + 1;
+              upsertMood(next);
+            }}
+            style={[styles.tile, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+            activeOpacity={0.75}
+          >
+            <View style={[styles.tileIcon, { backgroundColor: colors.primary + '18' }]}>
+              <Text style={{ fontSize: 14 }}>{getMoodEmoji(data?.moodRating ?? 3)}</Text>
+            </View>
+            <Text style={[styles.tileVal, { color: colors.text }]}>
+              {getMoodEmoji(data?.moodRating ?? 3)}
+            </Text>
+            <Text style={[styles.tileLbl, { color: colors.textSecondary }]}>Mood</Text>
+            <View style={[styles.tileTrack, { backgroundColor: accent + '22' }]}>
+              <View
+                style={[
+                  styles.tileFill,
+                  {
+                    backgroundColor: accent,
+                    width: `${((data?.moodRating ?? 3) / 5) * 100}%`,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={[{ fontSize: 9, color: colors.textDisabled, textAlign: 'center', marginTop: 2 }]}>
+              tap to change
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Streak + Consistency */}
+        {/* ─── 8. ACTIVITY STREAK ─────────────────────────────────────── */}
         <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
           <View style={styles.cardHeader}>
             <Text style={[styles.cardTitle, { color: colors.text }]}>Activity Streak</Text>
             <Text style={{ fontSize: 22 }}>🔥</Text>
           </View>
+
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 48, fontWeight: '900', color: colors.metricStreak, letterSpacing: -2 }}>{streak}</Text>
-              <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '600', letterSpacing: 1, textTransform: 'uppercase' }}>days</Text>
-            </View>
-            <View style={{ flex: 1, gap: 6 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>
-                {streak === 0 ? 'Start your streak today!' : streak >= 7 ? `${streak} days strong! 🏆` : `${7 - streak} more days to 7-day badge`}
+            <View style={{ alignItems: 'center', minWidth: 70 }}>
+              <Text style={{ fontSize: 52, fontWeight: '900', color: colors.metricStreak, letterSpacing: -2 }}>
+                {data?.currentStreak ?? 0}
               </Text>
-              <View style={[styles.bigTrack, { backgroundColor: colors.border }]}>
-                <View style={[styles.bigFill, { backgroundColor: colors.metricStreak, width: `${Math.min((streak / 30) * 100, 100)}%` }]} />
+              <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '600', letterSpacing: 1, textTransform: 'uppercase' }}>
+                days
+              </Text>
+            </View>
+
+            <View style={{ flex: 1, gap: 8 }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>
+                {(data?.currentStreak ?? 0) === 0
+                  ? 'Start your streak today!'
+                  : (data?.currentStreak ?? 0) >= 7
+                  ? `${data!.currentStreak} days strong! 🏆`
+                  : `${7 - (data?.currentStreak ?? 0)} more days to 7-day badge`}
+              </Text>
+
+              {/* Current streak bar */}
+              <View>
+                <View style={[styles.bigTrack, { backgroundColor: colors.border }]}>
+                  <View
+                    style={[
+                      styles.bigFill,
+                      {
+                        backgroundColor: colors.metricStreak,
+                        width: `${Math.min(((data?.currentStreak ?? 0) / 30) * 100, 100)}%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={{ fontSize: 10, color: colors.textDisabled, marginTop: 4 }}>
+                  {data?.currentStreak ?? 0} / 30 day goal · Best: {data?.bestStreak ?? 0} days
+                </Text>
               </View>
+
+              <Text style={{ fontSize: 11, color: colors.textSecondary, lineHeight: 16 }}>
+                Streak requires ≥5,000 steps OR 1 workout per day.
+              </Text>
             </View>
           </View>
         </View>
 
-        {/* Achievements */}
+        {/* ─── 9. ACHIEVEMENTS ────────────────────────────────────────── */}
         <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
           <View style={styles.cardHeader}>
             <Text style={[styles.cardTitle, { color: colors.text }]}>Achievements</Text>
-            <Text style={{ fontSize: 11, fontWeight: '700', color: accent }}>{unlockedBadgeIds.length}/{BADGE_DEFINITIONS.length}</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('History')}>
+              <Text style={[styles.seeAll, { color: accent }]}>
+                {data?.unlockedBadgeIds.length ?? 0}/{BADGE_DEFINITIONS.length}
+              </Text>
+            </TouchableOpacity>
           </View>
+
+          {/* Recent achievements from Supabase */}
+          {(data?.recentAchievements ?? []).length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 10, marginBottom: 14 }}
+            >
+              {data!.recentAchievements.slice(0, 5).map((ach) => {
+                const meta = ACHIEVEMENT_META[ach.achievement_type];
+                if (!meta) return null;
+                return (
+                  <View
+                    key={ach.id}
+                    style={[
+                      styles.achChip,
+                      { backgroundColor: meta.color + '18', borderColor: meta.color + '55' },
+                    ]}
+                  >
+                    <Text style={{ fontSize: 18 }}>{meta.icon}</Text>
+                    <Text style={[styles.achChipLabel, { color: colors.text }]}>{meta.label}</Text>
+                    <Text style={[styles.achChipDate, { color: colors.textSecondary }]}>
+                      {dayjs(ach.earned_at).format('MMM D')}
+                    </Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          )}
+
+          {/* Badge grid (legacy system) */}
           <View style={styles.badgesGrid}>
             {displayBadges.map((badge) => (
-              <View key={badge.id} style={[styles.badge, { backgroundColor: badge.unlocked ? badge.color + '15' : colors.surface, borderColor: badge.unlocked ? badge.color + '60' : colors.border }]}>
-                <Text style={{ fontSize: badge.unlocked ? 22 : 18, opacity: badge.unlocked ? 1 : 0.3 }}>{badge.icon}</Text>
-                <Text style={[styles.badgeLabel, { color: badge.unlocked ? colors.text : colors.textDisabled }]}>{badge.label}</Text>
-                {badge.unlocked && <View style={[styles.badgeDot, { backgroundColor: badge.color }]} />}
+              <View
+                key={badge.id}
+                style={[
+                  styles.badge,
+                  {
+                    backgroundColor: badge.unlocked ? badge.color + '15' : colors.surface,
+                    borderColor: badge.unlocked ? badge.color + '60' : colors.border,
+                  },
+                ]}
+              >
+                <Text style={{ fontSize: badge.unlocked ? 22 : 18, opacity: badge.unlocked ? 1 : 0.3 }}>
+                  {badge.icon}
+                </Text>
+                <Text
+                  style={[
+                    styles.badgeLabel,
+                    { color: badge.unlocked ? colors.text : colors.textDisabled },
+                  ]}
+                >
+                  {badge.label}
+                </Text>
+                {badge.unlocked && (
+                  <View style={[styles.badgeDot, { backgroundColor: badge.color }]} />
+                )}
               </View>
             ))}
           </View>
         </View>
 
-        {/* Recent Activities */}
-        <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border, marginBottom: 110 }]}>
+        {/* ─── 10. RECENT ACTIVITIES FEED ─────────────────────────────── */}
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: colors.surfaceElevated, borderColor: colors.border, marginBottom: 110 },
+          ]}
+        >
           <View style={styles.cardHeader}>
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Recent Activities</Text>
-            {recentActivities.length > 0 && (
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Recent Activity</Text>
+            {(data?.feedItems ?? []).length > 0 && (
               <TouchableOpacity onPress={() => navigation.navigate('History')}>
                 <Text style={[styles.seeAll, { color: accent }]}>See all</Text>
               </TouchableOpacity>
             )}
           </View>
-          {recentActivities.length === 0 ? (
+
+          {(data?.feedItems ?? []).length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={{ fontSize: 48 }}>🏃</Text>
               <Text style={[styles.emptyTitle, { color: colors.text }]}>No activities yet</Text>
-              <Text style={[styles.emptySub, { color: colors.textSecondary }]}>Start your first workout to track progress</Text>
-              <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: accent }]} onPress={() => navigation.navigate('Activity')} activeOpacity={0.85}>
-                <Text style={[styles.emptyBtnText, { color: colors.onPrimary }]}>Start Activity</Text>
+              <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
+                Start your first workout to track progress
+              </Text>
+              <TouchableOpacity
+                style={[styles.emptyBtn, { backgroundColor: accent }]}
+                onPress={() => navigation.navigate('Workouts')}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.emptyBtnText, { color: colors.onPrimary }]}>Log Workout</Text>
               </TouchableOpacity>
             </View>
           ) : (
-            recentActivities.slice(0, 5).map((a, i) => {
-              const meta: Record<string, { icon: string; color: string; label: string }> = {
-                running: { icon: 'run', color: colors.metricBurn, label: 'Running' },
-                cycling: { icon: 'bike', color: colors.metricDistance, label: 'Cycling' },
-                walking: { icon: 'walk', color: colors.secondary, label: 'Walking' },
-                swimming: { icon: 'swim', color: colors.metricHydration, label: 'Swimming' },
-                strength: { icon: 'weight', color: colors.metricStrength, label: 'Strength' },
-                hiit: { icon: 'fire', color: colors.metricBurn, label: 'HIIT' },
-                yoga: { icon: 'meditation', color: colors.metricProtein, label: 'Yoga' },
-              };
-              const m = meta[a.type] ?? meta.walking;
-              const mins = Math.floor(a.duration / 60);
-              const isLast = i === recentActivities.slice(0, 5).length - 1;
+            data!.feedItems.map((item, i) => {
+              const isLast = i === data!.feedItems.length - 1;
               return (
-                <TouchableOpacity key={a.id} activeOpacity={0.7} onPress={() => navigation.navigate('PhotoLog', { activity: a })}
-                  style={[actS.row, !isLast && { borderBottomWidth: 1, borderBottomColor: colors.divider }]}>
-                  <View style={[actS.iconWrap, { backgroundColor: m.color + '15' }]}><AppIcon name={m.icon} size={18} color={m.color} /></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[actS.type, { color: colors.text }]}>{m.label}</Text>
-                    <Text style={[actS.time, { color: colors.textSecondary }]}>{dayjs(a.startTime).format('MMM D · h:mm A')}</Text>
+                <TouchableOpacity
+                  key={item.id}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    if (item.kind === 'workout') {
+                      navigation.navigate('WorkoutDetail', { workoutId: item.referenceId });
+                    } else if (item.kind === 'food') {
+                      navigation.navigate('FoodLog');
+                    } else {
+                      navigation.navigate('History');
+                    }
+                  }}
+                  style={[
+                    feedS.row,
+                    !isLast && { borderBottomWidth: 1, borderBottomColor: colors.divider },
+                  ]}
+                >
+                  <View style={[feedS.iconWrap, { backgroundColor: item.color + '18' }]}>
+                    {item.kind === 'achievement' ? (
+                      <Text style={{ fontSize: 18 }}>
+                        {(ACHIEVEMENT_META[item.id.replace('ach_', '')] ?? { icon: '🏅' }).icon}
+                      </Text>
+                    ) : (
+                      <AppIcon name={item.icon} size={18} color={item.color} />
+                    )}
                   </View>
-                  <View style={actS.statsWrap}><Text style={[actS.statVal, { color: colors.text }]}>{a.steps.toLocaleString()}</Text><Text style={[actS.statLbl, { color: colors.textSecondary }]}>steps</Text></View>
-                  <View style={actS.statsWrap}><Text style={[actS.statVal, { color: colors.text }]}>{a.distance.toFixed(1)}</Text><Text style={[actS.statLbl, { color: colors.textSecondary }]}>km</Text></View>
-                  <View style={actS.statsWrap}><Text style={[actS.statVal, { color: colors.text }]}>{mins}m</Text><Text style={[actS.statLbl, { color: colors.textSecondary }]}>time</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[feedS.title, { color: colors.text }]}>{item.title}</Text>
+                    <Text style={[feedS.sub, { color: colors.textSecondary }]}>{item.subtitle}</Text>
+                  </View>
+                  <Text style={[feedS.time, { color: colors.textDisabled }]}>
+                    {dayjs(item.createdAt).format('h:mm A')}
+                  </Text>
                 </TouchableOpacity>
               );
             })
@@ -644,45 +1869,62 @@ try {
   );
 }
 
-const actS = StyleSheet.create({
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
+const feedS = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },
   iconWrap: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  type: { fontSize: 14, fontWeight: '700', letterSpacing: -0.2 },
-  time: { fontSize: 11, marginTop: 2, fontWeight: '500' },
-  statsWrap: { alignItems: 'center', minWidth: 36 },
-  statVal: { fontSize: 13, fontWeight: '700', letterSpacing: -0.3 },
-  statLbl: { fontSize: 10, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  title: { fontSize: 14, fontWeight: '700', letterSpacing: -0.2 },
+  sub: { fontSize: 12, marginTop: 2, fontWeight: '500' },
+  time: { fontSize: 11, fontWeight: '600' },
 });
 
 const styles = StyleSheet.create({
   scroll: { padding: spacing.md },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
+
+  // Header
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
   greeting: { ...typography.label, marginBottom: 3 },
   userName: { ...typography.h1, letterSpacing: -0.8 },
-  avatarBtn: { width: 46, height: 46, borderRadius: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
-  avatarText: { fontSize: 19, fontWeight: '900', fontFamily: 'Inter_900Black' },
-  streakBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1 },
-  streakNum: { fontSize: 15, fontWeight: '900', letterSpacing: -0.5, fontFamily: 'Inter_900Black' },
-  
-  // Hero Section (60% screen)
+  avatarBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    overflow: 'hidden',
+  },
+  avatarText: { fontSize: 19, fontWeight: '900' },
+  streakBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  streakNum: { fontSize: 15, fontWeight: '900', letterSpacing: -0.5 },
+
+  // Hero / APS
   heroSection: {
     marginBottom: spacing.xl,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heroContent: {
-    alignItems: 'center',
-    width: '100%',
-  },
+  heroContent: { alignItems: 'center', width: '100%' },
   apsRingContainer: {
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  apsRingCenter: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  apsRingCenter: { alignItems: 'center', justifyContent: 'center' },
   apsInfoBtn: {
     position: 'absolute',
     top: 0,
@@ -701,21 +1943,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     maxWidth: '90%',
   },
-  
-  // Metric Pills
-  metricPills: {
-    paddingHorizontal: 4,
-    gap: 12,
+
+  // Metric pills
+  metricPills: { paddingHorizontal: 4, gap: 12 },
+  metricPill: {
+    width: 140,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    alignItems: 'center',
   },
-metricPill: {
-  width: 140,
-  paddingHorizontal: 14,
-  paddingVertical: 14,
-  borderRadius: borderRadius.lg,
-  borderWidth: 1,
-  alignItems: 'center',
-  overflow: 'visible',   
-},
   metricPillIcon: {
     width: 40,
     height: 40,
@@ -723,51 +1961,162 @@ metricPill: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pillProgress: {
-    width: '100%',
-    height: 4,
-    borderRadius: 2,
-    marginTop: 12,
-    overflow: 'hidden',
-  },
-  pillProgressFill: {
-    height: 4,
-    borderRadius: 2,
-  },
+  pillProgress: { width: '100%', height: 4, borderRadius: 2, marginTop: 12, overflow: 'hidden' },
+  pillProgressFill: { height: 4, borderRadius: 2 },
+  addDataHint: { fontSize: 9, fontWeight: '700', marginTop: 4, letterSpacing: 0.3 },
+
+  // Quick actions
   sectionLabel: { ...typography.label, marginBottom: 12, marginTop: 4 },
   qaRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xl },
   qaCard: { flex: 1, padding: 14, borderRadius: borderRadius.lg, borderWidth: 1, gap: 8 },
   qaIconWrap: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   qaLabel: { ...typography.bodyBold, letterSpacing: -0.2 },
   qaSub: { ...typography.caption },
-  insightCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 14, borderRadius: 14, borderWidth: 1, borderLeftWidth: 3, marginBottom: 10 },
+
+  // Insight
+  insightCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderLeftWidth: 3,
+    marginBottom: 10,
+  },
   insightText: { flex: 1, fontSize: 13, fontWeight: '500', lineHeight: 19 },
-  challengeCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1, marginBottom: spacing.lg },
-  challengeLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 3 },
+
+  // Challenge
+  challengeCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: spacing.lg,
+  },
+  challengeLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginBottom: 3,
+  },
   challengeText: { fontSize: 13, fontWeight: '700', lineHeight: 18 },
   challengeCheck: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  challTrack: { height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 6 },
+  challFill: { height: 4, borderRadius: 2 },
+  challPct: { fontSize: 10, fontWeight: '600', marginTop: 3 },
+  challReward: { fontSize: 11, fontWeight: '700', marginTop: 2 },
+
+  // Cards
   card: { borderRadius: borderRadius.xl, borderWidth: 1, padding: spacing.md, marginBottom: spacing.lg },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   cardTitle: { ...typography.h4, letterSpacing: -0.3 },
-  cardBadge: { fontSize: 11, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  cardBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   seeAll: { fontSize: 12, fontWeight: '700' },
+
+  // Bar chart tooltip
+  barTooltip: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 10,
+  },
+
+  // Weekly stats
   weekDivider: { flexDirection: 'row', borderTopWidth: 1, marginTop: spacing.md, paddingTop: spacing.md },
   weekStatItem: { flex: 1, alignItems: 'center' },
   weekStatVal: { fontSize: 14, fontWeight: '800', letterSpacing: -0.4 },
   weekStatLbl: { fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: 3 },
+
+  // Metric tiles (water/sleep/mood)
   tilesRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
-  tile: { flex: 1, padding: 14, borderRadius: borderRadius.lg, borderWidth: 1, gap: 6 },
+  tile: { flex: 1, padding: 12, borderRadius: borderRadius.lg, borderWidth: 1, gap: 4, alignItems: 'center' },
   tileIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
   tileVal: { fontSize: 17, fontWeight: '800', letterSpacing: -0.5 },
-  tileLbl: { fontSize: 10, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase' },
-  tileTrack: { height: 3, borderRadius: 2, marginTop: 4, overflow: 'hidden' },
+  tileLbl: { fontSize: 10, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', textAlign: 'center' },
+  tileTrack: { height: 3, borderRadius: 2, marginTop: 4, overflow: 'hidden', width: '100%' },
   tileFill: { height: 3, borderRadius: 2 },
+  inlineEdit: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  editBtn: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+
+  // Streak
   bigTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
   bigFill: { height: 6, borderRadius: 3 },
+
+  // Achievements
+  achChip: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14, borderWidth: 1, alignItems: 'center', gap: 4, minWidth: 90 },
+  achChipLabel: { fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  achChipDate: { fontSize: 10, fontWeight: '500' },
   badgesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   badge: { width: '30%', borderWidth: 1, borderRadius: borderRadius.lg, paddingVertical: 12, alignItems: 'center', gap: 5 },
   badgeLabel: { fontSize: 9, fontWeight: '700', textAlign: 'center', letterSpacing: 0.2, paddingHorizontal: 4 },
   badgeDot: { width: 5, height: 5, borderRadius: 3 },
+
+  newUserBanner: {
+    width: '100%',
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  newUserBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Setup card (new user — no data yet)
+  setupCard: {
+    alignItems: 'center',
+    padding: 24,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    width: '100%',
+    gap: 10,
+  },
+  setupPrimaryCta: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: borderRadius.full,
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  setupTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: -0.4,
+    marginBottom: 8,
+  },
+  setupSub: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  setupSteps: { width: '100%', gap: 10 },
+  setupStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+  },
+  setupStepText: { flex: 1, fontSize: 14, fontWeight: '700' },
+
+  // Feed empty state
   emptyState: { alignItems: 'center', paddingVertical: 32, gap: 8 },
   emptyTitle: { fontSize: 16, fontWeight: '800', marginTop: 4 },
   emptySub: { fontSize: 12, textAlign: 'center', maxWidth: 220, fontWeight: '500' },

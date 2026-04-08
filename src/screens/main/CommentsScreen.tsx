@@ -1,12 +1,17 @@
 /**
- * CommentsScreen — Real comments CRUD
+ * CommentsScreen — Real-time comments CRUD
  *
- * Fixes:
- * - Uses corrected getComments() with proper profile join
- * - Real-time subscribe via Supabase Realtime (INSERT on feed_comments)
- * - Delete own comments with long-press
- * - Correct divider color (uses colors.border as fallback for divider)
- * - Auto-scroll to bottom on new comment
+ * ✅ Real Supabase data via socialService.getComments()
+ * ✅ Post comment → DB write, auto-appear via Realtime
+ * ✅ Delete own comment (long press) → DB delete + live remove from list
+ * ✅ Real-time: INSERT + DELETE events subscribed
+ * ✅ Auto-scroll to bottom on new comment
+ * ✅ Zero mock data
+ *
+ * FIX APPLIED:
+ *   - Added DELETE listener to real-time channel so deleted comments
+ *     disappear from list instantly (previously only INSERT was handled)
+ *   - divider uses colors.divider ?? colors.border (safe fallback)
  */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
@@ -50,7 +55,7 @@ export default function CommentsScreen() {
   useEffect(() => {
     loadComments();
 
-    // Real-time: subscribe to new comments on this feed item
+    // Real-time: subscribe to INSERT and DELETE on this feed item's comments
     const channel = supabase
       .channel(`comments:${feedItemId}`)
       .on(
@@ -61,10 +66,26 @@ export default function CommentsScreen() {
           table: 'feed_comments',
           filter: `feed_item_id=eq.${feedItemId}`,
         },
-        async () => {
-          // Reload comments to get joined profile data
+        async (payload) => {
+          // Reload to get joined profile data for the new comment
           const updated = await socialService.getComments(feedItemId);
           setComments(updated);
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'feed_comments',
+          filter: `feed_item_id=eq.${feedItemId}`,
+        },
+        (payload) => {
+          // ✅ FIX: Remove deleted comment from local state immediately
+          const deletedId = (payload.old as any)?.id;
+          if (deletedId) {
+            setComments(prev => prev.filter(c => c.id !== deletedId));
+          }
         },
       )
       .subscribe();
@@ -99,8 +120,9 @@ export default function CommentsScreen() {
       {
         text: 'Delete', style: 'destructive',
         onPress: async () => {
-          await socialService.deleteComment(comment.id);
+          // Optimistic remove — real-time DELETE will also fire (idempotent)
           setComments(prev => prev.filter(c => c.id !== comment.id));
+          await socialService.deleteComment(comment.id);
         },
       },
     ]);
@@ -131,6 +153,9 @@ export default function CommentsScreen() {
             <Text style={[c.time, { color: colors.textSecondary }]}>
               {dayjs(item.createdAt).fromNow()}
             </Text>
+            {isMe && (
+              <Text style={[c.deleteHint, { color: colors.textSecondary }]}>Hold to delete</Text>
+            )}
           </View>
           <Text style={[c.content, { color: colors.text }]}>{item.content}</Text>
         </View>
@@ -233,9 +258,10 @@ const c = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   avatarLetter: { fontSize: 14, fontWeight: '800' },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   name: { fontSize: 13, fontWeight: '800' },
   time: { fontSize: 11 },
+  deleteHint: { fontSize: 10, opacity: 0.5 },
   content: { fontSize: 14, lineHeight: 20, marginTop: 3 },
 });
 

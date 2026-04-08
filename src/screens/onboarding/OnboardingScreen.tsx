@@ -22,6 +22,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { databaseService } from '../../services/database';
 import { STORAGE_KEYS } from '../../constants/config';
 import { borderRadius, spacing } from '../../constants/theme';
+import { UNIT_SYSTEM_KEY } from '../../utils/units';
 
 
 const GOALS = [

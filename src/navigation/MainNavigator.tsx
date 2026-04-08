@@ -30,6 +30,9 @@ import DirectMessagesScreen from '../screens/main/DirectMessagesScreen';
 import ChatScreen from '../screens/main/ChatScreen';
 import ImportScreen from '../screens/main/ImportScreen';
 import NotificationInboxScreen from '../screens/NotificationInboxScreen';
+import EditProfileScreen from '../screens/main/EditProfileScreen';
+import NotificationSettingsScreen from '../screens/main/NotificationSettingsScreen';
+import DeleteAccountScreen from '../screens/main/DeleteAccountScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -181,6 +184,9 @@ export default function MainNavigator() {
 <Stack.Screen name="Chat"                component={ChatScreen}               options={{ headerShown: false }} />
 <Stack.Screen name="Import"              component={ImportScreen}             options={{ title: 'Import Data' }} />
 <Stack.Screen name="NotificationInbox"   component={NotificationInboxScreen}  options={{ headerShown: false }} />
+<Stack.Screen name="EditProfile"            component={EditProfileScreen}            options={{ headerShown: false }} />
+<Stack.Screen name="NotificationSettings"   component={NotificationSettingsScreen}   options={{ headerShown: false }} />
+<Stack.Screen name="DeleteAccount"          component={DeleteAccountScreen}          options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

@@ -9,6 +9,7 @@ interface ThemeContextType {
   mode: ThemeMode;
   isDark: boolean;
   colors: AppThemeColors;
+  accent: string;  
   setMode: (mode: ThemeMode) => void;
 }
 
@@ -41,7 +42,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const themeColors = isDark ? darkColors : lightColors;
 
   return (
-    <ThemeContext.Provider value={{ mode, isDark, colors: themeColors, setMode }}>
+    <ThemeContext.Provider value={{ mode, isDark, colors: themeColors, accent: themeColors.primary, setMode }}>
+
       {children}
     </ThemeContext.Provider>
   );

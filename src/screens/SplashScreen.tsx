@@ -3,10 +3,9 @@
  * Visual only; no navigation/auth logic.
  */
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Dimensions } from 'react-native';
+import { View, Text, Image, StyleSheet, Animated, Dimensions } from 'react-native';
 import Svg, { Defs, LinearGradient as SvgGradient, Rect, Stop } from 'react-native-svg';
 import { useTheme } from '../context/ThemeContext';
-import AppIconCircle from '../components/AppIconCircle';
 import Constants from 'expo-constants';
 
 const { width: W, height: H } = Dimensions.get('window');
@@ -54,7 +53,7 @@ export default function SplashScreen() {
   const g0 = colors.gradientBackdrop[0];
   const g1 = colors.gradientBackdrop[1] ?? g0;
   const g2 = colors.gradientBackdrop[2] ?? g1;
-  const version = Constants.expoConfig?.version ?? '3.0';
+  const version = Constants.expoConfig?.version ?? '1.0.0';
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -84,7 +83,7 @@ export default function SplashScreen() {
       <Animated.View
         style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}
       >
-        <AppIconCircle size={92} ringColor={colors.primary} glowColor={colors.primary} />
+        <Image source={require('../../assets/logo.png')} style={{ width: 76, height: 76, resizeMode: 'contain' }} />
 
         <Text style={[styles.brand, { color: colors.text }]}>EPEXFIT</Text>
         <Animated.Text style={[styles.tagline, { opacity: taglineFade, color: colors.textSecondary }]}>

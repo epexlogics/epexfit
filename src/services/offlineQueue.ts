@@ -19,7 +19,7 @@
  *   offlineQueue.startFlushListener();
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
+import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ export const offlineQueue = {
     };
     queue.push(item);
     await writeQueue(queue);
-    console.log(`[offlineQueue] Queued ${opts.operation} on ${opts.table} (total: ${queue.length})`);
+    if (__DEV__) console.log(`[offlineQueue] Queued ${opts.operation} on ${opts.table} (total: ${queue.length})`);
   },
 
   /**
@@ -145,12 +145,12 @@ export const offlineQueue = {
       try {
         await executeWrite(item);
         success++;
-        console.log(`[offlineQueue] Flushed ${item.operation}/${item.table} (id: ${item.id})`);
+        if (__DEV__) console.log(`[offlineQueue] Flushed ${item.operation}/${item.table} (id: ${item.id})`);
       } catch (err) {
         const nextRetry = item.retryCount + 1;
         if (nextRetry >= MAX_RETRIES) {
           failed++;
-          console.warn(`[offlineQueue] Dropped ${item.id} after ${MAX_RETRIES} retries`);
+          if (__DEV__) console.warn(`[offlineQueue] Dropped ${item.id} after ${MAX_RETRIES} retries`);
         } else {
           remaining.push({ ...item, retryCount: nextRetry });
           failed++;
@@ -161,7 +161,7 @@ export const offlineQueue = {
     }
 
     await writeQueue(remaining);
-    console.log(`[offlineQueue] Flush complete — success: ${success}, failed: ${failed}, pending: ${remaining.length}`);
+    if (__DEV__) console.log(`[offlineQueue] Flush complete — success: ${success}, failed: ${failed}, pending: ${remaining.length}`);
     return { success, failed };
   },
 
@@ -173,33 +173,33 @@ export const offlineQueue = {
   startFlushListener(): () => void {
     let wasOffline = false;
 
-    const unsubscribe = NetInfo.addEventListener((state) => {
+    // FIX: typed NetInfoState parameter — eliminates TS7006 implicit any errors
+    const unsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
       const isConnected = state.isConnected === true && state.isInternetReachable !== false;
-      
-      // Check for connection restoration
+
       const justCameOnline = wasOffline && isConnected;
-      
+
       if (!isConnected) {
         wasOffline = true;
-        console.log('[offlineQueue] Device went offline');
+        if (__DEV__) console.log('[offlineQueue] Device went offline');
       } else if (justCameOnline) {
         wasOffline = false;
-        console.log('[offlineQueue] Reconnected — flushing queue');
+        if (__DEV__) console.log('[offlineQueue] Reconnected — flushing queue');
         offlineQueue.flush().catch((err) => {
-          console.warn('[offlineQueue] Flush error:', err);
+          if (__DEV__) console.warn('[offlineQueue] Flush error:', err);
         });
       } else if (isConnected && !wasOffline) {
-        // Already online, nothing to do
         wasOffline = false;
       }
     });
 
     // Also check on mount if already online
-    NetInfo.fetch().then((state) => {
+    // FIX: typed NetInfoState parameter — eliminates TS7006 implicit any error
+    NetInfo.fetch().then((state: NetInfoState) => {
       if (state.isConnected === true) {
-        console.log('[offlineQueue] Already online on mount, checking queue...');
+        if (__DEV__) console.log('[offlineQueue] Already online on mount, checking queue...');
         offlineQueue.flush().catch((err) => {
-          console.warn('[offlineQueue] Initial flush error:', err);
+          if (__DEV__) console.warn('[offlineQueue] Initial flush error:', err);
         });
       }
     });
@@ -212,7 +212,7 @@ export const offlineQueue = {
    */
   async clear(): Promise<void> {
     await AsyncStorage.removeItem(QUEUE_KEY);
-    console.log('[offlineQueue] Queue cleared');
+    if (__DEV__) console.log('[offlineQueue] Queue cleared');
   },
 
   /**
@@ -220,7 +220,7 @@ export const offlineQueue = {
    */
   async getPending(): Promise<QueuedWrite[]> {
     return await readQueue();
-  }
+  },
 };
 
 export default offlineQueue;

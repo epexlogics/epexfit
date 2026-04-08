@@ -95,6 +95,7 @@ const VECTOR_FALLBACK_MAP: Record<string, VectorEntry> = {
   'swim':          { lib: 'MCI',      name: 'swim' },
   'meditation':    { lib: 'MCI',      name: 'meditation' },
   'soccer':        { lib: 'MCI',      name: 'soccer' },
+  'heart':         { lib: 'Ionicons', name: 'heart' },
 };
 
 interface AppIconProps {

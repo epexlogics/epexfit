@@ -8,6 +8,7 @@ import { Activity } from '../../types';
 import AppIcon from '../../components/AppIcon';
 import { borderRadius, spacing } from '../../constants/theme';
 import { formatPace } from '../../utils/paceUtils';
+import { useUnitSystem } from '../../utils/units';
 import dayjs from '../../utils/dayjs';
 
 // Expanded to all activity types
@@ -68,6 +69,7 @@ function detectPRs(activities: Activity[]): PRs {
 export default function HistoryScreen({ navigation }: any) {
   const { user } = useAuth();
   const { colors } = useTheme();
+  const unitSystem = useUnitSystem();
   const [refreshing, setRefreshing] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [filter, setFilter] = useState<FilterType>('all');
@@ -114,12 +116,16 @@ export default function HistoryScreen({ navigation }: any) {
                 <Text style={[styles.prVal, { color: accentColor }]}>
                   {formatPace(1, prs.fastestPace.value)}
                 </Text>
-                <Text style={[styles.prLbl, { color: colors.textSecondary }]}>Best pace /km</Text>
+                <Text style={[styles.prLbl, { color: colors.textSecondary }]}>Best pace /{unitSystem === 'imperial' ? 'mi' : 'km'}</Text>
               </View>
             )}
             {prs.longestRun && (
               <View style={styles.prItem}>
-                <Text style={[styles.prVal, { color: '#FF5B5B' }]}>{prs.longestRun.value.toFixed(1)} km</Text>
+                <Text style={[styles.prVal, { color: '#FF5B5B' }]}>
+                  {unitSystem === 'imperial'
+                    ? `${(prs.longestRun.value * 0.621371).toFixed(1)} mi`
+                    : `${prs.longestRun.value.toFixed(1)} km`}
+                </Text>
                 <Text style={[styles.prLbl, { color: colors.textSecondary }]}>Longest run</Text>
               </View>
             )}
@@ -212,7 +218,11 @@ export default function HistoryScreen({ navigation }: any) {
                   </View>
                   <View style={styles.statItem}>
                     <AppIcon name="map-marker-distance" size={13} color={meta.color} />
-                    <Text style={[styles.statVal, { color: colors.text }]}>{activity.distance.toFixed(2)} km</Text>
+                    <Text style={[styles.statVal, { color: colors.text }]}>
+                      {unitSystem === 'imperial'
+                        ? `${(activity.distance * 0.621371).toFixed(2)} mi`
+                        : `${activity.distance.toFixed(2)} km`}
+                    </Text>
                     <Text style={[styles.statLbl, { color: colors.textSecondary }]}>distance</Text>
                   </View>
                   <View style={styles.statItem}>
@@ -229,7 +239,7 @@ export default function HistoryScreen({ navigation }: any) {
                     <View style={styles.statItem}>
                       <AppIcon name="run-fast" size={13} color={meta.color} />
                       <Text style={[styles.statVal, { color: colors.text }]}>{pace}</Text>
-                      <Text style={[styles.statLbl, { color: colors.textSecondary }]}>/km</Text>
+                      <Text style={[styles.statLbl, { color: colors.textSecondary }]}>/{unitSystem === 'imperial' ? 'mi' : 'km'}</Text>
                     </View>
                   )}
                 </View>

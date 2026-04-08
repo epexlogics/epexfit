@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
-  ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, StatusBar,
+  ScrollView, StyleSheet, Text, Image, TextInput, TouchableOpacity, View, StatusBar,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { borderRadius } from '../../constants/theme';
-import AppIconCircle from '../../components/AppIconCircle';
 
 // Official Google brand SVG (unchanged colors — brand requirement) (was plain letter "G" — violates Google brand guidelines)
 function GoogleLogo({ size = 18 }: { size?: number }) {
@@ -77,7 +76,7 @@ export default function LoginScreen({ navigation }: any) {
       <ScrollView contentContainerStyle={[styles.scroll, { }]} showsVerticalScrollIndicator={false}>
 
         <View style={styles.logoArea}>
-          <AppIconCircle size={76} ringColor={colors.primary} glowColor={colors.primary} />
+          <Image source={require('../../assets/logo.png')} style={{ width: 76, height: 76, resizeMode: 'contain' }} />
           <Text style={[styles.brand, { color: colors.text }]}>EPEXFIT</Text>
           <Text style={[styles.tagline, { color: colors.textSecondary }]}>Precision training. Real momentum.</Text>
         </View>

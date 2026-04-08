@@ -1,3 +1,20 @@
-node_modules/ 
-.expo/ 
-*.zip 
+# Node modules
+node_modules/
+
+# Expo build files
+.expo/
+
+# Zip files
+*.zip
+
+# Environment variables (local only)
+.env
+
+# MacOS specific
+.DS_Store
+
+# Logs
+*.log
+
+# npm
+package-lock.json

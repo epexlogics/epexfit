@@ -204,6 +204,7 @@ export const typography = {
   h2: { fontSize: 26, fontWeight: '800' as const, lineHeight: 32, letterSpacing: -0.6, fontFamily: 'Inter_700Bold' },
   h3: { fontSize: 24, fontWeight: '600' as const, lineHeight: 30, letterSpacing: -0.5, fontFamily: 'Inter_600SemiBold' },
   h4: { fontSize: 18, fontWeight: '700' as const, lineHeight: 24, letterSpacing: -0.2, fontFamily: 'Inter_700Bold' },
+  titleMedium: { fontSize: 16, fontWeight: '500' as const, lineHeight: 24, letterSpacing: 0.15, fontFamily: 'Inter_500Medium' },
   // Body
   body: { fontSize: 14, fontWeight: '400' as const, lineHeight: 21, fontFamily: 'Inter_400Regular' },
   bodyBold: { fontSize: 14, fontWeight: '600' as const, lineHeight: 21, fontFamily: 'Inter_600SemiBold' },
@@ -255,12 +256,21 @@ export const shadows = {
 };
 
 const fontConfig = {
-  default: {
-    regular: { fontFamily: 'Inter_400Regular', fontWeight: '400' as const },
-    medium: { fontFamily: 'Inter_500Medium', fontWeight: '500' as const },
-    bold: { fontFamily: 'Inter_700Bold', fontWeight: '700' as const },
-    heavy: { fontFamily: 'Inter_900Black', fontWeight: '900' as const },
-  },
+  bodyLarge: { fontFamily: 'Inter_400Regular', fontWeight: '400' as const, letterSpacing: 0.15, lineHeight: 24, fontSize: 16 },
+  bodyMedium: { fontFamily: 'Inter_400Regular', fontWeight: '400' as const, letterSpacing: 0.25, lineHeight: 20, fontSize: 14 },
+  bodySmall: { fontFamily: 'Inter_400Regular', fontWeight: '400' as const, letterSpacing: 0.4, lineHeight: 16, fontSize: 12 },
+  titleLarge: { fontFamily: 'Inter_700Bold', fontWeight: '700' as const, letterSpacing: 0, lineHeight: 28, fontSize: 22 },
+  titleMedium: { fontFamily: 'Inter_500Medium', fontWeight: '500' as const, letterSpacing: 0.15, lineHeight: 24, fontSize: 16 },
+  titleSmall: { fontFamily: 'Inter_500Medium', fontWeight: '500' as const, letterSpacing: 0.1, lineHeight: 20, fontSize: 14 },
+  labelLarge: { fontFamily: 'Inter_500Medium', fontWeight: '500' as const, letterSpacing: 0.1, lineHeight: 20, fontSize: 14 },
+  labelMedium: { fontFamily: 'Inter_500Medium', fontWeight: '500' as const, letterSpacing: 0.5, lineHeight: 16, fontSize: 12 },
+  labelSmall: { fontFamily: 'Inter_500Medium', fontWeight: '500' as const, letterSpacing: 0.5, lineHeight: 16, fontSize: 11 },
+  headlineLarge: { fontFamily: 'Inter_700Bold', fontWeight: '700' as const, letterSpacing: 0, lineHeight: 40, fontSize: 32 },
+  headlineMedium: { fontFamily: 'Inter_700Bold', fontWeight: '700' as const, letterSpacing: 0, lineHeight: 36, fontSize: 28 },
+  headlineSmall: { fontFamily: 'Inter_700Bold', fontWeight: '700' as const, letterSpacing: 0, lineHeight: 32, fontSize: 24 },
+  displayLarge: { fontFamily: 'Inter_900Black', fontWeight: '900' as const, letterSpacing: -0.25, lineHeight: 64, fontSize: 57 },
+  displayMedium: { fontFamily: 'Inter_900Black', fontWeight: '900' as const, letterSpacing: 0, lineHeight: 52, fontSize: 45 },
+  displaySmall: { fontFamily: 'Inter_900Black', fontWeight: '900' as const, letterSpacing: 0, lineHeight: 44, fontSize: 36 },
 };
 
 export function buildPaperTheme(c: AppThemeColors, isDark: boolean) {

@@ -41,7 +41,8 @@ export default function GradientButton({
 }: GradientButtonProps) {
   const { colors } = useTheme();
   
-  const gradient = gradientColors ?? colors.gradientPrimary;
+  const gradient = (gradientColors ?? colors.gradientPrimary) as [string, string, ...string[]];
+
   
   const sizeStyles = {
     small: { paddingHorizontal: 20, paddingVertical: 10, fontSize: 13 },

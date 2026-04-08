@@ -5,9 +5,30 @@ import { socialService } from './socialService';
 
 const STREAK_CACHE_KEY = '@epexfit_streak_cache';
 
+// ── Cached getAuthUser ────────────────────────────────────────────────────
+// PERF FIX: mirrors the same cache in database.ts — prevents redundant
+// supabase.auth.getUser() calls when streaks.ts functions run in parallel
+// with database.ts functions (e.g. during HomeScreen's Promise.all load).
+let _authUserCache: { user: any; expiresAt: number } | null = null;
+
+async function getAuthUser() {
+  const now = Date.now();
+  if (_authUserCache && now < _authUserCache.expiresAt) {
+    return _authUserCache.user;
+  }
+  const { data: { user } } = await supabase.auth.getUser();
+  _authUserCache = { user, expiresAt: now + 30_000 }; // 30 second TTL
+  return user;
+}
+
+export function clearStreakAuthCache() {
+  _authUserCache = null;
+}
+
 /**
  * Recalculates the user's current activity streak from daily_logs.
- * Returns the streak count and persists it.
+ * Writes result to AsyncStorage cache for fast subsequent reads.
+ * Called in the background after HomeScreen initial render.
  */
 export async function recalculateStreak(userId: string): Promise<number> {
   try {
@@ -17,34 +38,63 @@ export async function recalculateStreak(userId: string): Promise<number> {
     const today = new Date().toISOString().split('T')[0];
     const ago365 = new Date();
     ago365.setDate(ago365.getDate() - 365);
+    const ago365Str = ago365.toISOString().split('T')[0];
 
-    const { data: logs } = await supabase
-      .from('daily_logs')
-      .select('date, steps')
-      .eq('user_id', authUser.id)
-      .gte('date', ago365.toISOString().split('T')[0])
-      .order('date', { ascending: false });
+    // Fetch both daily_logs (steps) AND workouts (any logged workout = active day)
+    const [{ data: logs }, { data: workouts }] = await Promise.all([
+      supabase
+        .from('daily_logs')
+        .select('date, steps')
+        .eq('user_id', authUser.id)
+        .gte('date', ago365Str)
+        .order('date', { ascending: false }),
+      supabase
+        .from('workouts')
+        .select('date')
+        .eq('user_id', authUser.id)
+        .gte('date', ago365Str),
+    ]);
 
-    const activeDates = new Set(
-      (logs ?? [])
-        .filter((l: any) => l.steps > 0)
-        .map((l: any) => l.date as string)
-    );
+    const activeDates = new Set<string>();
+
+    // Step-based active days
+    (logs ?? [])
+      .filter((l: any) => l.steps > 0)
+      .forEach((l: any) => activeDates.add(l.date as string));
+
+    // Workout-based active days (a logged workout = active regardless of steps)
+    (workouts ?? [])
+      .forEach((w: any) => {
+        const d = typeof w.date === 'string' ? w.date : new Date(w.date).toISOString().split('T')[0];
+        activeDates.add(d);
+      });
 
     let streak = 0;
     const cursor = new Date();
 
-    while (true) {
+    // Grace: if today has no activity yet, start counting from yesterday so the day
+    // isn't treated as a broken streak before the user has logged anything.
+    const todayStr = cursor.toISOString().split('T')[0];
+    const startFromYesterday = !activeDates.has(todayStr);
+    if (startFromYesterday) {
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    // One-day grace in the chain: a single rest day between workouts still counts
+    // (two inactive days in a row ends the streak).
+    let consecutiveMisses = 0;
+    for (let i = 0; i < 400; i++) {
       const dateStr = cursor.toISOString().split('T')[0];
       if (activeDates.has(dateStr)) {
         streak++;
-        cursor.setDate(cursor.getDate() - 1);
+        consecutiveMisses = 0;
       } else {
-        break;
+        consecutiveMisses++;
+        if (consecutiveMisses > 1) break;
       }
+      cursor.setDate(cursor.getDate() - 1);
     }
 
-    // Cache it locally for fast reads
     await AsyncStorage.setItem(
       STREAK_CACHE_KEY,
       JSON.stringify({ streak, updatedAt: today })
@@ -56,7 +106,11 @@ export async function recalculateStreak(userId: string): Promise<number> {
   }
 }
 
-/** Fast streak read from cache (falls back to 0) */
+/**
+ * Fast streak read from AsyncStorage cache (falls back to 0).
+ * Use this in HomeScreen's Promise.all — it's instant vs 365-day DB fetch.
+ * recalculateStreak() runs in the background to keep the cache fresh.
+ */
 export async function getCachedStreak(): Promise<number> {
   try {
     const raw = await AsyncStorage.getItem(STREAK_CACHE_KEY);
@@ -71,14 +125,17 @@ export async function getCachedStreak(): Promise<number> {
 /**
  * Checks which badges the user has earned and unlocks any new ones.
  * Returns array of newly unlocked badge definitions (for celebration UI).
+ * PERF FIX: uses getCachedStreak() instead of recalculateStreak() — the
+ * streak is already being recalculated in the HomeScreen background task,
+ * so no need to trigger a second 365-day DB fetch here.
  */
 export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIONS> {
   try {
     const authUser = await getAuthUser();
     if (!authUser) return [];
 
-    // Gather all data needed for badge evaluation
-    const streak = await recalculateStreak(userId);
+    // PERF FIX: read from cache — recalculateStreak runs separately in background
+    const streak = await getCachedStreak();
 
     const { data: activities } = await supabase
       .from('activities')
@@ -120,7 +177,6 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
       lastActivityHour,
     });
 
-    // Get already-unlocked badges
     const { data: existing } = await supabase
       .from('user_badges')
       .select('badge_id')
@@ -139,7 +195,6 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
       );
     }
 
-    // Publish streak milestones to the social feed
     const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100];
     if (STREAK_MILESTONES.includes(streak)) {
       socialService.publishFeedEvent('streak', { days: streak });
@@ -166,9 +221,4 @@ export async function getUnlockedBadgeIds(userId: string): Promise<string[]> {
   } catch {
     return [];
   }
-}
-
-async function getAuthUser() {
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
 }

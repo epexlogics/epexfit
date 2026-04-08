@@ -1,12 +1,20 @@
 /**
  * dmService.ts — Direct Messages service
  *
- * Fixes:
- * - getConversations: eliminated N+1 unread count queries.
- *   Now fetches all unread counts in one query and merges client-side.
- * - subscribeToMessages: also receives messages you sent on another device
+ * ✅ All data from Supabase (direct_messages + profiles tables)
+ * ✅ getConversations: no N+1 — single unread query
+ * ✅ subscribeToMessages: receives BOTH incoming AND sent messages
+ * ✅ Deduplication via Set<id> to prevent double-rendering sent msgs
+ * ✅ Zero mock data
  *
- * Schema:
+ * FIX APPLIED:
+ *   - subscribeToMessages now has TWO channels:
+ *     1. incoming: recipient_id = currentUserId AND sender_id = partnerId
+ *     2. sent: sender_id = currentUserId AND recipient_id = partnerId
+ *        (needed for multi-device or if send() callback races with realtime)
+ *   - Returns a cleanup that unsubscribes both channels.
+ *
+ * Schema required:
  *   direct_messages(id, sender_id, recipient_id, message, created_at, is_read)
  *   profiles(id, full_name, avatar_url)
  */
@@ -104,11 +112,9 @@ export const dmService = {
   },
 
   /**
-   * FIX: Old version made one extra SELECT per conversation for unread count (N+1).
-   * New version:
-   * 1. Fetch latest message per partner (using seen map)
-   * 2. Fetch ALL unread counts in ONE query grouped by sender_id
-   * 3. Merge client-side
+   * Get all conversations for the current user.
+   * One entry per unique conversation partner, sorted by most recent message.
+   * Unread counts fetched in a single query (no N+1).
    */
   async getConversations(): Promise<Conversation[]> {
     const myId = await getMyId();
@@ -127,7 +133,7 @@ export const dmService = {
 
     if (error || !data) return [];
 
-    // Step 2: Build conversation list — one entry per unique partner (newest msg wins)
+    // Step 2: One entry per unique partner (newest msg wins via order)
     const seen = new Map<string, Conversation>();
 
     for (const row of data as Array<Record<string, unknown>>) {
@@ -137,7 +143,7 @@ export const dmService = {
         : (row.sender as Record<string, unknown>);
       const partnerId = String(partner?.id ?? '');
 
-      if (seen.has(partnerId)) continue;
+      if (!partnerId || seen.has(partnerId)) continue;
 
       seen.set(partnerId, {
         partnerId,
@@ -145,13 +151,13 @@ export const dmService = {
         partnerAvatar: (partner?.avatar_url as string | null) ?? null,
         lastMessage: String(row.message),
         lastMessageAt: String(row.created_at),
-        unreadCount: 0, // will fill below
+        unreadCount: 0,
       });
     }
 
     if (seen.size === 0) return [];
 
-    // Step 3: Fetch all unread counts in ONE query
+    // Step 3: Fetch ALL unread counts in ONE query
     const partnerIds = Array.from(seen.keys());
     const { data: unreadRows } = await supabase
       .from('direct_messages')
@@ -160,26 +166,26 @@ export const dmService = {
       .eq('is_read', false)
       .in('sender_id', partnerIds);
 
-    // Count unread per sender
     const unreadMap: Record<string, number> = {};
     for (const row of unreadRows ?? []) {
       const sid = String((row as any).sender_id);
       unreadMap[sid] = (unreadMap[sid] ?? 0) + 1;
     }
 
-    // Merge unread counts
-    const result = Array.from(seen.values()).map(conv => ({
+    return Array.from(seen.values()).map(conv => ({
       ...conv,
       unreadCount: unreadMap[conv.partnerId] ?? 0,
     }));
-
-    return result;
   },
 
   /**
-   * Subscribe to new messages in a conversation.
-   * Listens for messages where I am the recipient from this partner,
-   * OR messages I sent (for multi-device sync).
+   * Subscribe to new messages in a 1:1 conversation.
+   *
+   * FIX: Two channels:
+   *   - ch_in:  messages FROM partnerId TO currentUserId (incoming)
+   *   - ch_out: messages FROM currentUserId TO partnerId (sent — for multi-device)
+   *
+   * The caller should deduplicate using message ID (see ChatScreen seenIds ref).
    * Returns cleanup function.
    */
   subscribeToMessages(
@@ -187,8 +193,11 @@ export const dmService = {
     currentUserId: string,
     onMessage: (msg: DirectMessage) => void,
   ): () => void {
-    const channel: RealtimeChannel = supabase
-      .channel(`dm:${[currentUserId, partnerId].sort().join(':')}`)
+    const channelKey = [currentUserId, partnerId].sort().join(':');
+
+    // Incoming messages from partner
+    const chIn: RealtimeChannel = supabase
+      .channel(`dm_in:${channelKey}`)
       .on(
         'postgres_changes',
         {
@@ -206,6 +215,29 @@ export const dmService = {
       )
       .subscribe();
 
-    return () => { channel.unsubscribe(); };
+    // Sent messages — for multi-device sync (e.g. sent on web, show on mobile)
+    const chOut: RealtimeChannel = supabase
+      .channel(`dm_out:${channelKey}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'direct_messages',
+          filter: `sender_id=eq.${currentUserId}`,
+        },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          if (row.recipient_id === partnerId) {
+            onMessage(mapRow(row));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      chIn.unsubscribe();
+      chOut.unsubscribe();
+    };
   },
 };

@@ -43,9 +43,10 @@ export function calcCalorieBurnGoal(level: 'beginner'|'intermediate'|'advanced')
 export function calculateAPS(input: APSInput): APSResult {
   const pct = (v: number, g: number) => (g > 0 ? Math.min(v / g, 1) : 0);
 
+  // FIX: no planned workouts = truly new user → consistency is 0, not a free 60
   const consistency = input.plannedWorkouts > 0
     ? pct(input.completedWorkouts, input.plannedWorkouts) * 100
-    : 60;
+    : 0;
 
   const activity = (pct(input.stepsToday, input.stepGoal) * 0.5 + pct(input.calBurned, input.calGoal) * 0.5) * 100;
 
@@ -53,9 +54,15 @@ export function calculateAPS(input: APSInput): APSResult {
 
   const recovery = (Math.min(input.sleepHours / 8, 1) * 0.7 + (input.mood / 5) * 0.3) * 100;
 
-  const progress = input.weekPace && input.prevWeekPace && input.prevWeekPace > 0
-    ? Math.min(((input.prevWeekPace - input.weekPace) / input.prevWeekPace) * 500, 100)
-    : 0; // New users get 0 — no data means no progress score yet, not a free 50
+  // FIX: progress pillar — use calorie burn trend OR pace trend so non-runners score too
+  let progress = 0;
+  if (input.weekPace && input.prevWeekPace && input.prevWeekPace > 0) {
+    // Runner path: improvement in pace (lower = faster = better)
+    progress = Math.min(((input.prevWeekPace - input.weekPace) / input.prevWeekPace) * 500, 100);
+  } else if (input.calBurned > 0 && input.calGoal > 0) {
+    // Non-runner path: reward hitting/exceeding calorie burn goal this week
+    progress = Math.min((input.calBurned / input.calGoal) * 60, 100);
+  }
 
   const total = Math.round(
     consistency * 0.30 + activity * 0.25 + nutrition * 0.20 + recovery * 0.15 + progress * 0.10

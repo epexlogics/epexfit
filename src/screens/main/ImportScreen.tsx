@@ -5,6 +5,7 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,15 +15,20 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import * as AuthSession from 'expo-auth-session';
+import { makeRedirectUri } from 'expo-auth-session';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../../context/ThemeContext';
 import { useToast } from '../../contexts/ToastContext';
 import AppIcon from '../../components/AppIcon';
 import { importFromStrava, parseTcxActivity, importFromHealthPlatform } from '../../services/importService';
 import { borderRadius, spacing } from '../../constants/theme';
+import { openAuthSessionAsync } from 'expo-web-browser';
 
-// Strava OAuth handled via expo-auth-session in the host app.
-// This screen shows the connection state and triggers actions.
+const STRAVA_CLIENT_ID = process.env.EXPO_PUBLIC_STRAVA_CLIENT_ID ?? '';
+const STRAVA_CLIENT_SECRET = process.env.EXPO_PUBLIC_STRAVA_CLIENT_SECRET ?? '';
+const STRAVA_AUTH_URL = 'https://www.strava.com/oauth/mobile/authorize';
+const STRAVA_TOKEN_URL = 'https://www.strava.com/oauth/token';
 
 function ImportCard({
   icon,
@@ -118,31 +124,51 @@ export default function ImportScreen() {
 
   // ── Strava ─────────────────────────────────────────────────────────────
   const handleStravaConnect = useCallback(async () => {
-    // In the real app, trigger expo-auth-session OAuth flow here.
-    // After receiving the code, call exchangeStravaCode then importFromStrava.
-    Alert.alert(
-      'Connect Strava',
-      'This will open the Strava authorisation page in your browser.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Open Strava',
-          onPress: async () => {
-            setStravaLoading(true);
-            try {
-              // TODO: Replace with actual expo-auth-session Strava OAuth flow.
-              // const result = await promptStravaAuth();
-              // const { accessToken } = await exchangeStravaCode(result.code, STRAVA_SECRET);
-              // const summary = await importFromStrava(accessToken);
-              // show({ message: `Imported ${summary.imported} activities`, variant: 'success' });
-              show({ message: 'Strava OAuth integration — add EXPO_PUBLIC_STRAVA_CLIENT_ID to .env and wire expo-auth-session. See DEPLOYMENT_GUIDE.md.', variant: 'info', duration: 6000 });
-            } finally {
-              setStravaLoading(false);
-            }
-          },
-        },
-      ],
-    );
+    if (!STRAVA_CLIENT_ID) {
+      show({ message: 'Add EXPO_PUBLIC_STRAVA_CLIENT_ID to .env to enable Strava import.', variant: 'error', duration: 5000 });
+      return;
+    }
+    setStravaLoading(true);
+    try {
+      const redirectUri = makeRedirectUri({ scheme: 'epexfit', path: 'strava' });
+      const authUrl =
+        `${STRAVA_AUTH_URL}?client_id=${STRAVA_CLIENT_ID}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&response_type=code` +
+        `&scope=activity:read_all` +
+        `&approval_prompt=auto`;
+
+const result = await openAuthSessionAsync(authUrl, redirectUri);
+
+  if (result.type === 'success' && result.url) {
+    const code = new URL(result.url).searchParams.get('code');
+    const tokenRes = await fetch(STRAVA_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: STRAVA_CLIENT_ID,
+        client_secret: STRAVA_CLIENT_SECRET,
+        code: code,
+        grant_type: 'authorization_code',
+      }),
+    });
+        if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
+        const tokenJson = await tokenRes.json() as { access_token: string };
+        const summary = await importFromStrava(tokenJson.access_token);
+        show({
+          message: `Imported ${summary.imported} activit${summary.imported !== 1 ? 'ies' : 'y'}${summary.skipped > 0 ? ` (${summary.skipped} skipped)` : ''}`,
+          variant: 'success',
+        });
+      } else if (result.type === 'cancel' || result.type === 'dismiss') {
+        // User cancelled — do nothing
+      } else {
+        throw new Error('Strava authorisation failed');
+      }
+    } catch (e: any) {
+      show({ message: e?.message ?? 'Strava import failed', variant: 'error' });
+    } finally {
+      setStravaLoading(false);
+    }
   }, [show]);
 
   // ── Garmin (TCX file) ──────────────────────────────────────────────────
@@ -188,14 +214,58 @@ export default function ImportScreen() {
   const handleHealthImport = useCallback(async () => {
     setHealthLoading(true);
     try {
-      // TODO: Request permissions from expo-health-connect (Android)
-      // or react-native-health (iOS), then map workouts to ImportedActivity[]
-      // and call importFromHealthPlatform(workouts).
-      show({
-        message: 'Health platform import — wire expo-health-connect (Android) or react-native-health (iOS). See DEPLOYMENT_GUIDE.md.',
-        variant: 'info',
-        duration: 6000,
-      });
+      if (Platform.OS === 'android') {
+        // Android: expo-health-connect
+        const HealthConnect = await import('react-native-health-connect').catch(() => null);
+        if (!HealthConnect) {
+          show({ message: 'Health Connect not available. Install it from the Play Store.', variant: 'error' });
+          return;
+        }
+        const isInit = await HealthConnect.initialize();
+        if (!isInit) {
+          show({ message: 'Health Connect could not be initialised on this device.', variant: 'error' });
+          return;
+        }
+        await HealthConnect.requestPermission([
+          { accessType: 'read', recordType: 'Steps' },
+          { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
+          { accessType: 'read', recordType: 'ExerciseSession' },
+        ]);
+        const now = new Date();
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const records = await HealthConnect.readRecords('ExerciseSession', {
+          timeRangeFilter: {
+            operator: 'between',
+            startTime: monthAgo.toISOString(),
+            endTime: now.toISOString(),
+          },
+        });
+        const mapped = (records?.records ?? []).map((r: any, i: number) => ({
+          externalId: `health_connect_${r.metadata?.id ?? i}`,
+          source: 'google_fit' as const,
+          type: 'other',
+          distanceKm: (r.totalDistance?.inMeters ?? 0) / 1000,
+          durationSec: r.endTime && r.startTime
+            ? Math.round((new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 1000)
+            : 0,
+          calories: r.totalActiveCalories?.inCalories ?? 0,
+          startedAt: r.startTime ?? new Date().toISOString(),
+        }));
+        const summary = await importFromHealthPlatform(mapped);
+        show({
+          message: `Imported ${summary.imported} activit${summary.imported !== 1 ? 'ies' : 'y'}${summary.skipped > 0 ? ` (${summary.skipped} skipped)` : ''}`,
+          variant: summary.imported > 0 ? 'success' : 'info',
+        });
+      } else {
+        // iOS: react-native-health (HealthKit)
+        show({
+          message: 'iOS HealthKit sync — wire react-native-health in your Expo dev build. See DEPLOYMENT_GUIDE.md.',
+          variant: 'info',
+          duration: 5000,
+        });
+      }
+    } catch (e: any) {
+      show({ message: e?.message ?? 'Health import failed', variant: 'error' });
     } finally {
       setHealthLoading(false);
     }
