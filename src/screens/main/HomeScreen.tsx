@@ -336,6 +336,12 @@ try {
                 <Text style={[styles.streakNum, { color: colors.metricStreak }]}>{streak}</Text>
               </View>
             )}
+            <TouchableOpacity
+              onPress={() => navigation.navigate('NotificationInbox')}
+              style={[styles.avatarBtn, { backgroundColor: accent + '18', borderColor: accent + '60' }]}
+            >
+              <Text style={{ fontSize: 20 }}>🔔</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation.navigate('Profile')}
   style={[styles.avatarBtn, { backgroundColor: accent + '18', borderColor: accent + '60' }]}>
   {avatarUri ? (

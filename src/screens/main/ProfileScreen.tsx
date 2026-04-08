@@ -369,6 +369,21 @@ const handleSaveReminders = async () => {
         <AppIcon name="chevron-right" size={18} color={colors.textDisabled} />
       </TouchableOpacity>
 
+      {/* Import Data */}
+      <TouchableOpacity
+        style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: spacing.sm }]}
+        onPress={() => navigation.navigate('Import')}
+      >
+        <View style={[{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#4D9FFF18' }]}>
+          <AppIcon name="clipboard-text" size={20} color="#4D9FFF" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>Import Data</Text>
+          <Text style={[{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }]}>Import workouts and health data from other apps</Text>
+        </View>
+        <AppIcon name="chevron-right" size={18} color={colors.textDisabled} />
+      </TouchableOpacity>
+
       {/* Appearance */}
       <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>APPEARANCE</Text>
       <View style={[styles.card, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>

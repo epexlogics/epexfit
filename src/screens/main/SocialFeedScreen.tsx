@@ -210,6 +210,14 @@ export default function SocialFeedScreen() {
           )}
           <TouchableOpacity
             style={[s.findBtn, { backgroundColor: accent + '15', borderColor: accent + '40' }]}
+            onPress={() => navigation.navigate('DirectMessages')}
+            activeOpacity={0.8}
+          >
+            <Text style={{ fontSize: 14 }}>💬</Text>
+            <Text style={[s.findBtnText, { color: accent }]}>DMs</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.findBtn, { backgroundColor: accent + '15', borderColor: accent + '40' }]}
             onPress={() => navigation.navigate('UserSearch')}
             activeOpacity={0.8}
           >
