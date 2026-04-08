@@ -9,6 +9,9 @@ node_modules/
 
 # Environment variables (local only)
 .env
+.env.local
+.env.*.local
+*.env
 
 # MacOS specific
 .DS_Store
@@ -59,4 +62,4 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# @end expo-cli
+# @end expo-cli".env" 
