@@ -426,10 +426,16 @@ try {
                     <View style={[styles.metricPillIcon, { backgroundColor: metric.color + '20' }]}>
                       <AppIcon name={metric.icon} size={18} color={metric.color} />
                     </View>
-                    <Text style={[typography.h3, { color: colors.text, marginTop: 8 }]}>
-                      {metric.decimals ? metric.value.toFixed(metric.decimals) : metric.value.toLocaleString()}
-                      <Text style={[typography.caption, { color: colors.textSecondary }]}>{metric.unit}</Text>
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: 8, gap: 2 }}>
+  <Text style={[typography.h3, { color: colors.text, lineHeight: 28 }]}>
+    {metric.decimals ? metric.value.toFixed(metric.decimals) : metric.value.toLocaleString()}
+  </Text>
+  {metric.unit ? (
+    <Text style={[typography.caption, { color: colors.textSecondary, marginBottom: 3 }]}>
+      {metric.unit}
+    </Text>
+  ) : null}
+</View>
                     <Text style={[typography.label, { color: colors.textSecondary, marginTop: 2 }]}>
                       {metric.label}
                     </Text>
@@ -695,13 +701,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     gap: 12,
   },
-  metricPill: {
-    width: 140,
-    padding: 16,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
+metricPill: {
+  width: 140,
+  paddingHorizontal: 14,
+  paddingVertical: 14,
+  borderRadius: borderRadius.lg,
+  borderWidth: 1,
+  alignItems: 'center',
+  overflow: 'visible',   
+},
   metricPillIcon: {
     width: 40,
     height: 40,

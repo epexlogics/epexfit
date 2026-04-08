@@ -50,15 +50,20 @@ export default function AppNavigator() {
   const { user, isLoading } = useAuth();
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    if (user) {
+useEffect(() => {
+  if (user) {
+    // Check profile field first (survives re-installs), then local cache
+    if ((user as any).onboarding_complete === true) {
+      setOnboardingDone(true);
+    } else {
       AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING).then((val) => {
         setOnboardingDone(val === 'complete');
       });
-    } else {
-      setOnboardingDone(null);
     }
-  }, [user]);
+  } else {
+    setOnboardingDone(null);
+  }
+}, [user]);
 
   if (isLoading || (user && onboardingDone === null)) return <SplashScreen />;
 

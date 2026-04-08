@@ -26,6 +26,10 @@ import SocialFeedScreen from '../screens/main/SocialFeedScreen';
 import UserProfileScreen from '../screens/main/UserProfileScreen';
 import FollowersListScreen from '../screens/main/FollowersListScreen';
 import CommentsScreen from '../screens/main/CommentsScreen';
+import DirectMessagesScreen from '../screens/main/DirectMessagesScreen';
+import ChatScreen from '../screens/main/ChatScreen';
+import ImportScreen from '../screens/main/ImportScreen';
+import NotificationInboxScreen from '../screens/NotificationInboxScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -173,6 +177,10 @@ export default function MainNavigator() {
       <Stack.Screen name="UserProfile"        component={UserProfileScreen}        options={{ headerShown: false }} />
       <Stack.Screen name="FollowersList"      component={FollowersListScreen}      options={{ headerShown: false }} />
       <Stack.Screen name="Comments"           component={CommentsScreen}           options={{ headerShown: false }} />
+      <Stack.Screen name="DirectMessages"      component={DirectMessagesScreen}    options={{ headerShown: false }} />
+<Stack.Screen name="Chat"                component={ChatScreen}               options={{ headerShown: false }} />
+<Stack.Screen name="Import"              component={ImportScreen}             options={{ title: 'Import Data' }} />
+<Stack.Screen name="NotificationInbox"   component={NotificationInboxScreen}  options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

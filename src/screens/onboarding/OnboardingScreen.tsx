@@ -4,8 +4,13 @@
  * Step 2: Fitness level
  * Step 3: Schedule (days/week)
  * Step 4: Body metrics
+ *
+ * FIXES APPLIED:
+ * - Issue 2: Onboarding flag now also stored in user profile (survives reinstall/new device)
+ * - Issue 3: finishCalled ref prevents double-tap / double navigation
+ * - Issue 4: Goal creation wrapped in its own try/catch (non-fatal), single alert guard
  */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, Platform, Alert, KeyboardAvoidingView,
@@ -17,6 +22,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { databaseService } from '../../services/database';
 import { STORAGE_KEYS } from '../../constants/config';
 import { borderRadius, spacing } from '../../constants/theme';
+
 
 const GOALS = [
   { key: 'lose_weight',       label: 'Lose Weight',        icon: '🔥', desc: 'Burn fat, get lean' },
@@ -56,6 +62,9 @@ export default function OnboardingScreen({ navigation }: any) {
   const [weight, setWeight] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // FIX (Issue 3): ref guard prevents double-tap triggering two navigation calls
+  const finishCalled = useRef(false);
+
   const canProceed = () => {
     if (step === 0) return selectedGoal !== null;
     if (step === 1) return selectedLevel !== null;
@@ -65,23 +74,31 @@ export default function OnboardingScreen({ navigation }: any) {
   };
 
   const handleFinish = async () => {
-    if (!user || saving) return;
+    // FIX (Issue 3): block if already in-flight (ref check is synchronous, unlike state)
+    if (!user || saving || finishCalled.current) return;
+    finishCalled.current = true;
     setSaving(true);
+
+    // FIX (Issue 4): single alert flag so repeated promise rejections only show one alert
+    let alertShown = false;
+
     try {
       const h = parseFloat(height);
       const w = parseFloat(weight);
-      // FIX: explicitly reject 0 — parseFloat('0') passes isNaN check but is invalid
       if (isNaN(h) || isNaN(w) || h <= 0 || w <= 0 || h < 50 || h > 300 || w < 20 || w > 500) {
         Alert.alert('Invalid values', 'Please enter realistic height (cm) and weight (kg). Values cannot be zero.');
+        finishCalled.current = false; // allow retry after validation error
         setSaving(false);
         return;
       }
 
-      await updateProfile({ height: h, weight: w });
+      // FIX (Issue 2): persist onboarding_complete to user profile so it survives
+      // reinstalls and new devices — AppNavigator checks this before AsyncStorage
+      await updateProfile({ height: h, weight: w, onboarding_complete: true } as any);
+
       await AsyncStorage.setItem('user_fitness_goal', selectedGoal ?? '');
       await AsyncStorage.setItem('user_fitness_level', selectedLevel ?? '');
       await AsyncStorage.setItem('user_training_days', String(trainingDays));
-      // FIX: also save under ONBOARDING key so HomeScreen APS can read trainingDays
       await AsyncStorage.setItem('@epexfit_onboarding', JSON.stringify({
         goal: selectedGoal,
         level: selectedLevel,
@@ -90,27 +107,41 @@ export default function OnboardingScreen({ navigation }: any) {
         weight: w,
       }));
 
-      // Pre-create default goals based on selection
-      const stepGoal = selectedLevel === 'beginner' ? 7000 : selectedLevel === 'intermediate' ? 10000 : 12000;
-      const runGoal  = trainingDays >= 4 ? 10 : trainingDays >= 3 ? 7 : 5;
+      // FIX (Issue 4): goal creation is non-fatal — a network/RLS failure here
+      // should NOT prevent the user entering the app or trigger a confusing error alert
+      try {
+        const stepGoal = selectedLevel === 'beginner' ? 7000 : selectedLevel === 'intermediate' ? 10000 : 12000;
+        const runGoal  = trainingDays >= 4 ? 10 : trainingDays >= 3 ? 7 : 5;
+        const deadline30 = new Date(); deadline30.setDate(deadline30.getDate() + 30);
+        const deadline90 = new Date(); deadline90.setDate(deadline90.getDate() + 90);
 
-      const deadline30  = new Date(); deadline30.setDate(deadline30.getDate() + 30);
-      const deadline90  = new Date(); deadline90.setDate(deadline90.getDate() + 90);
+        await Promise.all([
+          databaseService.saveGoal({ userId: user.id, type: 'steps',    target: stepGoal, current: 0, unit: 'steps',   startDate: new Date(), deadline: deadline30, completed: false }),
+          databaseService.saveGoal({ userId: user.id, type: 'water',    target: 8,        current: 0, unit: 'glasses', startDate: new Date(), deadline: deadline30, completed: false }),
+          databaseService.saveGoal({ userId: user.id, type: 'calories', target: 500,      current: 0, unit: 'kcal',    startDate: new Date(), deadline: deadline30, completed: false }),
+          databaseService.saveGoal({ userId: user.id, type: 'running',  target: runGoal,  current: 0, unit: 'km',      startDate: new Date(), deadline: deadline90, completed: false }),
+        ]);
+      } catch (goalError) {
+        // Goals will be creatable later from GoalsScreen — silently continue
+        console.warn('[Onboarding] Default goals creation failed (non-fatal):', goalError);
+      }
 
-      await Promise.all([
-        databaseService.saveGoal({ userId: user.id, type: 'steps', target: stepGoal, current: 0, unit: 'steps', startDate: new Date(), deadline: deadline30, completed: false }),
-        databaseService.saveGoal({ userId: user.id, type: 'water', target: 8, current: 0, unit: 'glasses', startDate: new Date(), deadline: deadline30, completed: false }),
-        databaseService.saveGoal({ userId: user.id, type: 'calories', target: 500, current: 0, unit: 'kcal', startDate: new Date(), deadline: deadline30, completed: false }),
-        databaseService.saveGoal({ userId: user.id, type: 'running', target: runGoal, current: 0, unit: 'km', startDate: new Date(), deadline: deadline90, completed: false }),
-      ]);
-
+      // Mark onboarding complete locally — AppNavigator reads this to skip onboarding
       await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING, 'complete');
       navigation.replace('Main');
+
     } catch (error) {
-      Alert.alert('Error', 'Something went wrong. Please try again.');
-    } finally {
+      // FIX (Issue 4): only show one alert even if multiple async ops reject
+      if (!alertShown) {
+        alertShown = true;
+        Alert.alert('Error', 'Something went wrong. Please try again.');
+      }
+      // Reset guards so user can retry
+      finishCalled.current = false;
       setSaving(false);
     }
+    // NOTE: no finally setSaving(false) here — on success the screen unmounts via
+    // navigation.replace('Main'), so there is no state to reset.
   };
 
   const current = STEPS[step];
@@ -257,7 +288,7 @@ export default function OnboardingScreen({ navigation }: any) {
           <TouchableOpacity
             onPress={() => {
               if (step < STEPS.length - 1) setStep(step + 1);
-              else if (!saving) handleFinish();
+              else handleFinish();
             }}
             disabled={!canProceed() || saving}
             activeOpacity={0.85}
