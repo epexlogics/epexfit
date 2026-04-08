@@ -1,7 +1,11 @@
 /**
- * FollowersListScreen — Shows followers or following of a user
- * Route params: userId, type ('followers' | 'following'), userName
- * Each row shows: avatar, name, follow-back button if they follow you
+ * FollowersListScreen — Real followers / following list
+ *
+ * Fixes:
+ * - Uses corrected getFollowers/getFollowing with proper profile joins
+ * - Shows username if available
+ * - Follow/unfollow optimistic update with loading state per row
+ * - Tap row to navigate to that user's profile
  */
 import React, { useEffect, useState } from 'react';
 import {
@@ -9,7 +13,7 @@ import {
   Image, ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { socialService, FollowUser } from '../../services/socialService';
@@ -18,7 +22,6 @@ import { borderRadius, spacing } from '../../constants/theme';
 export default function FollowersListScreen() {
   const { colors } = useTheme();
   const { user: me } = useAuth();
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { userId, type, userName } = route.params ?? {};
@@ -46,13 +49,15 @@ export default function FollowersListScreen() {
     } else {
       await socialService.follow(targetId);
     }
-    setUsers(prev => prev.map(u => u.id === targetId ? { ...u, isFollowing: !isFollowing } : u));
+    setUsers(prev => prev.map(u =>
+      u.id === targetId ? { ...u, isFollowing: !isFollowing } : u,
+    ));
     setFollowLoadingId(null);
   };
 
   const renderItem = ({ item }: { item: FollowUser }) => {
     const isMe = item.id === me?.id;
-    const isLoading = followLoadingId === item.id;
+    const isRowLoading = followLoadingId === item.id;
 
     return (
       <TouchableOpacity
@@ -64,15 +69,24 @@ export default function FollowersListScreen() {
           <Image source={{ uri: item.avatarUrl }} style={[s.avatar, { borderColor: colors.border }]} />
         ) : (
           <View style={[s.avatarFallback, { backgroundColor: accent + '20' }]}>
-            <Text style={[s.avatarLetter, { color: accent }]}>{item.fullName.charAt(0).toUpperCase()}</Text>
+            <Text style={[s.avatarLetter, { color: accent }]}>
+              {item.fullName.charAt(0).toUpperCase()}
+            </Text>
           </View>
         )}
 
         <View style={{ flex: 1 }}>
           <Text style={[s.name, { color: colors.text }]}>{item.fullName}</Text>
-          {item.followsMe && !isMe && (
-            <Text style={[s.followsYou, { color: accent }]}>Follows you</Text>
-          )}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {item.username && (
+              <Text style={[s.username, { color: colors.textSecondary }]}>@{item.username}</Text>
+            )}
+            {item.followsMe && !isMe && (
+              <View style={[s.followsYouBadge, { backgroundColor: accent + '15', borderColor: accent + '30' }]}>
+                <Text style={[s.followsYouText, { color: accent }]}>Follows you</Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {!isMe && (
@@ -82,13 +96,18 @@ export default function FollowersListScreen() {
               borderColor: item.isFollowing ? colors.border : accent,
             }]}
             onPress={() => handleFollowToggle(item.id, item.isFollowing)}
-            disabled={isLoading}
+            disabled={isRowLoading}
             activeOpacity={0.8}
           >
-            {isLoading ? (
-              <ActivityIndicator size="small" color={item.isFollowing ? colors.textSecondary : '#000'} />
+            {isRowLoading ? (
+              <ActivityIndicator
+                size="small"
+                color={item.isFollowing ? colors.textSecondary : '#000'}
+              />
             ) : (
-              <Text style={[s.btnText, { color: item.isFollowing ? colors.textSecondary : '#000' }]}>
+              <Text style={[s.btnText, {
+                color: item.isFollowing ? colors.textSecondary : '#000',
+              }]}>
                 {item.isFollowing ? 'Following' : item.followsMe ? 'Follow Back' : 'Follow'}
               </Text>
             )}
@@ -98,15 +117,22 @@ export default function FollowersListScreen() {
     );
   };
 
+  const title = type === 'followers'
+    ? `${userName}'s Followers`
+    : `${userName} Following`;
+
   return (
     <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={[s.header, { }]}>
+      <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
           <Text style={[s.backText, { color: accent }]}>← Back</Text>
         </TouchableOpacity>
-        <Text style={[s.title, { color: colors.text }]}>
-          {type === 'followers' ? `${userName}'s Followers` : `${userName} Following`}
-        </Text>
+        <Text style={[s.title, { color: colors.text }]} numberOfLines={1}>{title}</Text>
+        {!loading && (
+          <Text style={[s.countBadge, { color: colors.textSecondary }]}>
+            {users.length}
+          </Text>
+        )}
       </View>
 
       {loading ? (
@@ -135,18 +161,36 @@ export default function FollowersListScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: spacing.md, paddingBottom: 12 },
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: spacing.md, paddingBottom: 12,
+  },
   backBtn: { paddingRight: 6, paddingVertical: 4 },
   backText: { fontSize: 16, fontWeight: '700' },
   title: { flex: 1, fontSize: 17, fontWeight: '900', letterSpacing: -0.3 },
+  countBadge: { fontSize: 14, fontWeight: '600' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 48 },
   emptyText: { fontSize: 15, fontWeight: '600' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: borderRadius.xl, borderWidth: 1, padding: 14, marginBottom: 10 },
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderRadius: borderRadius.xl, borderWidth: 1, padding: 14, marginBottom: 10,
+  },
   avatar: { width: 46, height: 46, borderRadius: 23, borderWidth: 1.5 },
-  avatarFallback: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  avatarFallback: {
+    width: 46, height: 46, borderRadius: 23,
+    alignItems: 'center', justifyContent: 'center',
+  },
   avatarLetter: { fontSize: 20, fontWeight: '800' },
   name: { fontSize: 15, fontWeight: '800' },
-  followsYou: { fontSize: 11, fontWeight: '700', marginTop: 2 },
-  btn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, minWidth: 90, alignItems: 'center', justifyContent: 'center', height: 36 },
+  username: { fontSize: 12 },
+  followsYouBadge: {
+    paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 6, borderWidth: 1,
+  },
+  followsYouText: { fontSize: 10, fontWeight: '700' },
+  btn: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5,
+    minWidth: 90, alignItems: 'center', justifyContent: 'center', height: 36,
+  },
   btnText: { fontSize: 12, fontWeight: '800' },
 });

@@ -1,35 +1,38 @@
 /**
- * UserProfileScreen — Public profile of any EpexFit user
- * Shows: avatar, name, follower/following counts (tappable),
- * streak, achievements, activity count, rank, follow/unfollow button.
- * Private profiles show locked message unless current user follows them.
+ * UserProfileScreen — Real public profile
+ *
+ * Fixes:
+ * - Uses corrected getPublicProfile() with proper count queries
+ * - Shows bio if available
+ * - Shows username if available
+ * - Follow/unfollow with correct optimistic count update
+ * - Navigate to followers/following lists
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Image, ActivityIndicator, Alert,
+  Image, ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { socialService, PublicProfile } from '../../services/socialService';
 import { BADGE_DEFINITIONS } from '../../constants/badges';
 import { borderRadius, spacing } from '../../constants/theme';
 
-function getRank(badgeCount: number, streak: number, activities: number): { label: string; color: string; icon: string } {
+function getRank(badgeCount: number, streak: number, activities: number) {
   const score = badgeCount * 10 + streak + activities;
   if (score >= 200) return { label: 'Legend', color: '#C084FC', icon: '👑' };
-  if (score >= 100) return { label: 'Elite', color: '#FBBF24', icon: '🏆' };
-  if (score >= 50)  return { label: 'Pro', color: '#22D3EE', icon: '⚡' };
-  if (score >= 20)  return { label: 'Athlete', color: '#4ADE80', icon: '🎯' };
-  return { label: 'Rookie', color: '#94A3B8', icon: '🌱' };
+  if (score >= 100) return { label: 'Elite',  color: '#FBBF24', icon: '🏆' };
+  if (score >= 50)  return { label: 'Pro',    color: '#22D3EE', icon: '⚡' };
+  if (score >= 20)  return { label: 'Athlete',color: '#4ADE80', icon: '🎯' };
+  return              { label: 'Rookie', color: '#94A3B8', icon: '🌱' };
 }
 
 export default function UserProfileScreen() {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const { user: me } = useAuth();
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { userId, userName } = route.params ?? {};
@@ -53,10 +56,16 @@ export default function UserProfileScreen() {
     setFollowLoading(true);
     if (profile.isFollowing) {
       await socialService.unfollow(userId);
-      setProfile(p => p ? { ...p, isFollowing: false, followerCount: p.followerCount - 1 } : p);
+      setProfile(p => p ? {
+        ...p, isFollowing: false,
+        followerCount: Math.max(0, p.followerCount - 1),
+      } : p);
     } else {
       await socialService.follow(userId);
-      setProfile(p => p ? { ...p, isFollowing: true, followerCount: p.followerCount + 1 } : p);
+      setProfile(p => p ? {
+        ...p, isFollowing: true,
+        followerCount: p.followerCount + 1,
+      } : p);
     }
     setFollowLoading(false);
   };
@@ -66,7 +75,7 @@ export default function UserProfileScreen() {
   if (loading) {
     return (
       <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={['top']}>
-        <View style={[s.header, { }]}>
+        <View style={s.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
             <Text style={[s.backText, { color: accent }]}>← Back</Text>
           </TouchableOpacity>
@@ -82,7 +91,7 @@ export default function UserProfileScreen() {
   if (!profile) {
     return (
       <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={['top']}>
-        <View style={[s.header, { }]}>
+        <View style={s.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
             <Text style={[s.backText, { color: accent }]}>← Back</Text>
           </TouchableOpacity>
@@ -100,8 +109,7 @@ export default function UserProfileScreen() {
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Header */}
-      <View style={[s.header, { }]}>
+      <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
           <Text style={[s.backText, { color: accent }]}>← Back</Text>
         </TouchableOpacity>
@@ -118,7 +126,6 @@ export default function UserProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
         {/* Hero card */}
         <View style={[s.heroCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-          {/* Avatar */}
           <View style={[s.avatarWrap, { backgroundColor: accent + '20', borderColor: accent + '40' }]}>
             {profile.avatarUrl ? (
               <Image source={{ uri: profile.avatarUrl }} style={{ width: 84, height: 84, borderRadius: 28 }} />
@@ -130,6 +137,12 @@ export default function UserProfileScreen() {
           </View>
 
           <Text style={[s.userName, { color: colors.text }]}>{profile.fullName}</Text>
+          {profile.username && (
+            <Text style={[s.userHandle, { color: colors.textSecondary }]}>@{profile.username}</Text>
+          )}
+          {profile.bio ? (
+            <Text style={[s.bio, { color: colors.textSecondary }]}>{profile.bio}</Text>
+          ) : null}
 
           {/* Rank badge */}
           <View style={[s.rankBadge, { backgroundColor: rank.color + '20', borderColor: rank.color + '50' }]}>
@@ -137,31 +150,39 @@ export default function UserProfileScreen() {
             <Text style={[s.rankText, { color: rank.color }]}>{rank.label}</Text>
           </View>
 
-          {/* Follow stats */}
+          {/* Stats row */}
           <View style={s.followRow}>
             <TouchableOpacity
               style={s.followStat}
-              onPress={() => navigation.navigate('FollowersList', { userId, type: 'followers', userName: profile.fullName })}
+              onPress={() => navigation.navigate('FollowersList', {
+                userId, type: 'followers', userName: profile.fullName,
+              })}
             >
               <Text style={[s.followNum, { color: colors.text }]}>{profile.followerCount}</Text>
               <Text style={[s.followLbl, { color: colors.textSecondary }]}>Followers</Text>
             </TouchableOpacity>
+
             <View style={[s.followDivider, { backgroundColor: colors.border }]} />
+
             <TouchableOpacity
               style={s.followStat}
-              onPress={() => navigation.navigate('FollowersList', { userId, type: 'following', userName: profile.fullName })}
+              onPress={() => navigation.navigate('FollowersList', {
+                userId, type: 'following', userName: profile.fullName,
+              })}
             >
               <Text style={[s.followNum, { color: colors.text }]}>{profile.followingCount}</Text>
               <Text style={[s.followLbl, { color: colors.textSecondary }]}>Following</Text>
             </TouchableOpacity>
+
             <View style={[s.followDivider, { backgroundColor: colors.border }]} />
+
             <View style={s.followStat}>
               <Text style={[s.followNum, { color: colors.text }]}>{profile.activityCount}</Text>
               <Text style={[s.followLbl, { color: colors.textSecondary }]}>Activities</Text>
             </View>
           </View>
 
-          {/* Follow button — hide for own profile */}
+          {/* Follow button — hidden for own profile */}
           {!isMyProfile && (
             <TouchableOpacity
               style={[s.followBtn, {
@@ -173,9 +194,14 @@ export default function UserProfileScreen() {
               activeOpacity={0.8}
             >
               {followLoading ? (
-                <ActivityIndicator size="small" color={profile.isFollowing ? colors.textSecondary : '#000'} />
+                <ActivityIndicator
+                  size="small"
+                  color={profile.isFollowing ? colors.textSecondary : '#000'}
+                />
               ) : (
-                <Text style={[s.followBtnText, { color: profile.isFollowing ? colors.textSecondary : '#000' }]}>
+                <Text style={[s.followBtnText, {
+                  color: profile.isFollowing ? colors.textSecondary : '#000',
+                }]}>
                   {profile.isFollowing ? '✓ Following' : profile.followsMe ? 'Follow Back' : 'Follow'}
                 </Text>
               )}
@@ -194,7 +220,6 @@ export default function UserProfileScreen() {
           </View>
         )}
 
-        {/* Private lock */}
         {isPrivateLocked ? (
           <View style={[s.lockCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
             <Text style={{ fontSize: 48 }}>🔒</Text>
@@ -205,7 +230,6 @@ export default function UserProfileScreen() {
           </View>
         ) : (
           <>
-            {/* Achievements */}
             <Text style={[s.sectionLabel, { color: colors.textSecondary }]}>
               ACHIEVEMENTS · {profile.badgeIds.length}/{BADGE_DEFINITIONS.length}
             </Text>
@@ -218,8 +242,14 @@ export default function UserProfileScreen() {
                       backgroundColor: unlocked ? badge.color + '15' : colors.surface,
                       borderColor: unlocked ? badge.color + '50' : colors.border,
                     }]}>
-                      <Text style={{ fontSize: unlocked ? 20 : 16, opacity: unlocked ? 1 : 0.2 }}>{badge.icon}</Text>
-                      <Text style={{ fontSize: 9, fontWeight: '700', color: unlocked ? colors.text : colors.textDisabled, textAlign: 'center', paddingHorizontal: 2 }}>
+                      <Text style={{ fontSize: unlocked ? 20 : 16, opacity: unlocked ? 1 : 0.2 }}>
+                        {badge.icon}
+                      </Text>
+                      <Text style={{
+                        fontSize: 9, fontWeight: '700',
+                        color: unlocked ? colors.text : colors.textSecondary,
+                        textAlign: 'center', paddingHorizontal: 2,
+                      }}>
                         {badge.label}
                       </Text>
                     </View>
@@ -236,34 +266,67 @@ export default function UserProfileScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: spacing.md, paddingBottom: 12 },
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: spacing.md, paddingBottom: 12,
+  },
   backBtn: { paddingRight: 6, paddingVertical: 4 },
   backText: { fontSize: 16, fontWeight: '700' },
   headerTitle: { flex: 1, fontSize: 18, fontWeight: '900', letterSpacing: -0.3 },
   privateBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   emptyTitle: { fontSize: 18, fontWeight: '800' },
-  heroCard: { margin: spacing.md, borderRadius: borderRadius.xxl, borderWidth: 1, padding: 28, alignItems: 'center', gap: 12 },
-  avatarWrap: { width: 90, height: 90, borderRadius: 30, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  heroCard: {
+    margin: spacing.md, borderRadius: borderRadius.xxl, borderWidth: 1,
+    padding: 28, alignItems: 'center', gap: 10,
+  },
+  avatarWrap: {
+    width: 90, height: 90, borderRadius: 30,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 2,
+  },
   avatarLetter: { fontSize: 36, fontWeight: '900' },
   userName: { fontSize: 22, fontWeight: '900', letterSpacing: -0.5 },
-  rankBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },
+  userHandle: { fontSize: 13, fontWeight: '600', marginTop: -4 },
+  bio: { fontSize: 13, textAlign: 'center', lineHeight: 18, paddingHorizontal: 16 },
+  rankBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1,
+  },
   rankText: { fontSize: 13, fontWeight: '800' },
   followRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   followStat: { alignItems: 'center', paddingHorizontal: 18, paddingVertical: 4 },
   followNum: { fontSize: 20, fontWeight: '900', letterSpacing: -0.5 },
   followLbl: { fontSize: 11, fontWeight: '600', marginTop: 1 },
   followDivider: { width: 1, height: 28 },
-  followBtn: { paddingHorizontal: 32, paddingVertical: 12, borderRadius: 999, borderWidth: 1.5, minWidth: 140, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  followBtn: {
+    paddingHorizontal: 32, paddingVertical: 12, borderRadius: 999, borderWidth: 1.5,
+    minWidth: 140, alignItems: 'center', justifyContent: 'center', marginTop: 4,
+  },
   followBtnText: { fontSize: 14, fontWeight: '800' },
-  streakCard: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: spacing.md, marginBottom: spacing.md, padding: 16, borderRadius: borderRadius.xl, borderWidth: 1 },
+  streakCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    marginHorizontal: spacing.md, marginBottom: spacing.md,
+    padding: 16, borderRadius: borderRadius.xl, borderWidth: 1,
+  },
   streakNum: { fontSize: 16, fontWeight: '900' },
   streakSub: { fontSize: 12, marginTop: 2 },
-  lockCard: { marginHorizontal: spacing.md, borderRadius: borderRadius.xl, borderWidth: 1, padding: 40, alignItems: 'center', gap: 12 },
+  lockCard: {
+    marginHorizontal: spacing.md, borderRadius: borderRadius.xl, borderWidth: 1,
+    padding: 40, alignItems: 'center', gap: 12,
+  },
   lockTitle: { fontSize: 20, fontWeight: '900' },
   lockSub: { fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: 16 },
-  sectionLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 10, marginTop: 4, paddingHorizontal: spacing.md },
-  card: { marginHorizontal: spacing.md, marginBottom: spacing.lg, borderRadius: borderRadius.xl, borderWidth: 1, padding: spacing.md },
+  sectionLabel: {
+    fontSize: 10, fontWeight: '700', letterSpacing: 1.5,
+    marginBottom: 10, marginTop: 4, paddingHorizontal: spacing.md,
+  },
+  card: {
+    marginHorizontal: spacing.md, marginBottom: spacing.lg,
+    borderRadius: borderRadius.xl, borderWidth: 1, padding: spacing.md,
+  },
   badgesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  badge: { width: '18%', borderWidth: 1, borderRadius: 12, paddingVertical: 10, alignItems: 'center', gap: 4 },
+  badge: {
+    width: '18%', borderWidth: 1, borderRadius: 12,
+    paddingVertical: 10, alignItems: 'center', gap: 4,
+  },
 });

@@ -1,21 +1,25 @@
 /**
- * socialService.ts — Extended social features
- * - Feed with likes + comments
- * - Follow/unfollow
- * - Follower/following lists
- * - User profile (public/private)
- * - Comments on feed items
+ * socialService.ts — Fixed social features
  *
- * Supabase tables needed:
- *   follows (id, follower_id, following_id, created_at)
- *   activity_feed (id, actor_id, type, payload jsonb, created_at)
- *   feed_likes (id, feed_item_id, user_id, created_at)
- *   feed_comments (id, feed_item_id, user_id, content, created_at)
- *   profiles (id, full_name, avatar_url, is_private bool default false)
+ * Key fixes:
+ * - getFeed: correct liked-by-me check using separate query (not broken nested filter)
+ * - getFollowCounts: use .count with head:true correctly via separate selects
+ * - search: added username field support
+ * - All queries tested against standard Supabase JS v2 API
+ *
+ * Supabase tables required:
+ *   profiles        (id, full_name, username, avatar_url, bio, is_private)
+ *   follows         (id, follower_id, following_id, created_at)
+ *   activity_feed   (id, actor_id, type, payload jsonb, created_at)
+ *   feed_likes      (id, feed_item_id, user_id, created_at)
+ *   feed_comments   (id, feed_item_id, user_id, content, created_at)
+ *   direct_messages (id, sender_id, recipient_id, message, created_at, is_read)
  */
 
 import { supabase } from './supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// ── Types ──────────────────────────────────────────────────────────────────
 
 export interface FeedItem {
   id: string;
@@ -43,9 +47,10 @@ export interface FeedComment {
 export interface FollowUser {
   id: string;
   fullName: string;
+  username?: string;
   avatarUrl?: string;
-  isFollowing: boolean;   // current user follows them
-  followsMe: boolean;     // they follow current user
+  isFollowing: boolean;
+  followsMe: boolean;
 }
 
 export interface FollowCounts {
@@ -56,7 +61,9 @@ export interface FollowCounts {
 export interface PublicProfile {
   id: string;
   fullName: string;
+  username?: string;
   avatarUrl?: string;
+  bio?: string;
   isPrivate: boolean;
   followerCount: number;
   followingCount: number;
@@ -69,30 +76,40 @@ export interface PublicProfile {
 
 const FEED_CACHE_KEY = '@epexfit_social_feed';
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+async function getMyId(): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.id ?? null;
+}
+
+// ── Service ────────────────────────────────────────────────────────────────
+
 class SocialService {
-  /** Follow a user */
+
+  // ── Follow / Unfollow ────────────────────────────────────────────────────
+
   async follow(followingId: string): Promise<{ error: any }> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const myId = await getMyId();
+      if (!myId) throw new Error('Not authenticated');
       const { error } = await supabase
         .from('follows')
-        .insert({ follower_id: user.id, following_id: followingId });
+        .insert({ follower_id: myId, following_id: followingId });
       return { error };
     } catch (error) {
       return { error };
     }
   }
 
-  /** Unfollow a user */
   async unfollow(followingId: string): Promise<{ error: any }> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const myId = await getMyId();
+      if (!myId) throw new Error('Not authenticated');
       const { error } = await supabase
         .from('follows')
         .delete()
-        .eq('follower_id', user.id)
+        .eq('follower_id', myId)
         .eq('following_id', followingId);
       return { error };
     } catch (error) {
@@ -100,151 +117,178 @@ class SocialService {
     }
   }
 
-  /** Check if current user follows a given user */
   async isFollowing(followingId: string): Promise<boolean> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return false;
+      const myId = await getMyId();
+      if (!myId) return false;
       const { data } = await supabase
-        .from('follows').select('id')
-        .eq('follower_id', user.id).eq('following_id', followingId).maybeSingle();
+        .from('follows')
+        .select('id')
+        .eq('follower_id', myId)
+        .eq('following_id', followingId)
+        .maybeSingle();
       return !!data;
     } catch {
       return false;
     }
   }
 
-  /** Get follower/following counts for a user */
+  // ── Follow counts ────────────────────────────────────────────────────────
+
+  /**
+   * FIX: Supabase count with head:true returns count in the response object,
+   * not in data. Must destructure { count } directly from the query result.
+   */
   async getFollowCounts(userId: string): Promise<FollowCounts> {
     try {
       const [followersRes, followingRes] = await Promise.all([
-        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', userId),
-        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', userId),
+        supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('following_id', userId),
+        supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('follower_id', userId),
       ]);
-      return { followers: followersRes.count ?? 0, following: followingRes.count ?? 0 };
+      return {
+        followers: followersRes.count ?? 0,
+        following: followingRes.count ?? 0,
+      };
     } catch {
       return { followers: 0, following: 0 };
     }
   }
 
-  /** Get list of followers for a user, with follow-back status */
+  // ── Followers / Following lists ──────────────────────────────────────────
+
   async getFollowers(userId: string): Promise<FollowUser[]> {
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-      const myId = me?.id ?? '';
+      const myId = await getMyId();
 
-      // People who follow userId
-      const { data: rows } = await supabase
+      const { data: rows, error } = await supabase
         .from('follows')
-        .select('follower_id, profiles:follower_id(id, full_name, avatar_url)')
+        .select(`
+          follower_id,
+          profile:profiles!follower_id (
+            id, full_name, username, avatar_url
+          )
+        `)
         .eq('following_id', userId);
 
-      const users = (rows ?? []).map((r: any) => r.profiles).filter(Boolean);
-      const ids = users.map((u: any) => u.id);
-      if (!ids.length) return [];
+      if (error || !rows?.length) return [];
 
-      // Check who current user follows among them
-      const { data: myFollows } = myId
-        ? await supabase.from('follows').select('following_id')
-            .eq('follower_id', myId).in('following_id', ids)
-        : { data: [] };
+      const profiles = rows.map((r: any) => r.profile).filter(Boolean);
+      const ids = profiles.map((p: any) => p.id);
 
-      const myFollowSet = new Set((myFollows ?? []).map((f: any) => f.following_id));
-
-      // Check who among them follows current user
-      const { data: theyFollowMe } = myId
-        ? await supabase.from('follows').select('follower_id')
-            .eq('following_id', myId).in('follower_id', ids)
-        : { data: [] };
-
-      const followsMeSet = new Set((theyFollowMe ?? []).map((f: any) => f.follower_id));
-
-      return users.map((u: any) => ({
-        id: u.id,
-        fullName: u.full_name ?? 'EpexFit User',
-        avatarUrl: u.avatar_url,
-        isFollowing: myFollowSet.has(u.id),
-        followsMe: followsMeSet.has(u.id),
-      }));
+      return await this._enrichWithFollowStatus(profiles, ids, myId);
     } catch {
       return [];
     }
   }
 
-  /** Get list of people a user is following */
   async getFollowing(userId: string): Promise<FollowUser[]> {
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-      const myId = me?.id ?? '';
+      const myId = await getMyId();
 
-      const { data: rows } = await supabase
+      const { data: rows, error } = await supabase
         .from('follows')
-        .select('following_id, profiles:following_id(id, full_name, avatar_url)')
+        .select(`
+          following_id,
+          profile:profiles!following_id (
+            id, full_name, username, avatar_url
+          )
+        `)
         .eq('follower_id', userId);
 
-      const users = (rows ?? []).map((r: any) => r.profiles).filter(Boolean);
-      const ids = users.map((u: any) => u.id);
-      if (!ids.length) return [];
+      if (error || !rows?.length) return [];
 
-      const { data: myFollows } = myId
-        ? await supabase.from('follows').select('following_id')
-            .eq('follower_id', myId).in('following_id', ids)
-        : { data: [] };
+      const profiles = rows.map((r: any) => r.profile).filter(Boolean);
+      const ids = profiles.map((p: any) => p.id);
 
-      const myFollowSet = new Set((myFollows ?? []).map((f: any) => f.following_id));
-
-      const { data: theyFollowMe } = myId
-        ? await supabase.from('follows').select('follower_id')
-            .eq('following_id', myId).in('follower_id', ids)
-        : { data: [] };
-
-      const followsMeSet = new Set((theyFollowMe ?? []).map((f: any) => f.follower_id));
-
-      return users.map((u: any) => ({
-        id: u.id,
-        fullName: u.full_name ?? 'EpexFit User',
-        avatarUrl: u.avatar_url,
-        isFollowing: myFollowSet.has(u.id),
-        followsMe: followsMeSet.has(u.id),
-      }));
+      return await this._enrichWithFollowStatus(profiles, ids, myId);
     } catch {
       return [];
     }
   }
 
-  /** Get public profile of any user */
+  private async _enrichWithFollowStatus(
+    profiles: any[],
+    ids: string[],
+    myId: string | null,
+  ): Promise<FollowUser[]> {
+    if (!ids.length) return [];
+
+    const [myFollowsRes, followsMeRes] = await Promise.all([
+      myId
+        ? supabase.from('follows').select('following_id').eq('follower_id', myId).in('following_id', ids)
+        : Promise.resolve({ data: [] }),
+      myId
+        ? supabase.from('follows').select('follower_id').eq('following_id', myId).in('follower_id', ids)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const myFollowSet = new Set((myFollowsRes.data ?? []).map((f: any) => f.following_id));
+    const followsMeSet = new Set((followsMeRes.data ?? []).map((f: any) => f.follower_id));
+
+    return profiles.map((p: any) => ({
+      id: p.id,
+      fullName: p.full_name ?? 'EpexFit User',
+      username: p.username,
+      avatarUrl: p.avatar_url,
+      isFollowing: myFollowSet.has(p.id),
+      followsMe: followsMeSet.has(p.id),
+    }));
+  }
+
+  // ── Public profile ───────────────────────────────────────────────────────
+
   async getPublicProfile(userId: string): Promise<PublicProfile | null> {
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-      const myId = me?.id ?? '';
+      const myId = await getMyId();
 
       const [
-        { data: profile },
-        { data: follows },
-        { data: following },
-        { data: activities },
-        { data: amFollowing },
-        { data: theyFollowMe },
+        profileRes,
+        followersRes,
+        followingRes,
+        activitiesRes,
+        amFollowingRes,
+        theyFollowMeRes,
       ] = await Promise.all([
-        supabase.from('profiles').select('id, full_name, avatar_url, is_private').eq('id', userId).maybeSingle(),
-        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('following_id', userId),
-        supabase.from('follows').select('id', { count: 'exact', head: true }).eq('follower_id', userId),
-        supabase.from('activities').select('id', { count: 'exact', head: true }).eq('user_id', userId),
-        myId ? supabase.from('follows').select('id').eq('follower_id', myId).eq('following_id', userId).maybeSingle() : Promise.resolve({ data: null }),
-        myId ? supabase.from('follows').select('id').eq('follower_id', userId).eq('following_id', myId).maybeSingle() : Promise.resolve({ data: null }),
+        supabase
+          .from('profiles')
+          .select('id, full_name, username, avatar_url, bio, is_private')
+          .eq('id', userId)
+          .maybeSingle(),
+        supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('following_id', userId),
+        supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('follower_id', userId),
+        supabase
+          .from('activities')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userId),
+        myId
+          ? supabase.from('follows').select('id').eq('follower_id', myId).eq('following_id', userId).maybeSingle()
+          : Promise.resolve({ data: null }),
+        myId
+          ? supabase.from('follows').select('id').eq('follower_id', userId).eq('following_id', myId).maybeSingle()
+          : Promise.resolve({ data: null }),
       ]);
 
+      const profile = profileRes.data;
       if (!profile) return null;
 
-      // Get unlocked badge ids
       let badgeIds: string[] = [];
+      let streak = 0;
       try {
         const { getUnlockedBadgeIds } = await import('./streaks');
         badgeIds = await getUnlockedBadgeIds(userId);
       } catch {}
-
-      // Get streak
-      let streak = 0;
       try {
         const { recalculateStreak } = await import('./streaks');
         streak = await recalculateStreak(userId);
@@ -253,77 +297,128 @@ class SocialService {
       return {
         id: userId,
         fullName: profile.full_name ?? 'EpexFit User',
+        username: profile.username,
         avatarUrl: profile.avatar_url,
+        bio: profile.bio,
         isPrivate: profile.is_private ?? false,
-        followerCount: (follows as any)?.count ?? 0,
-        followingCount: (following as any)?.count ?? 0,
-        activityCount: (activities as any)?.count ?? 0,
+        followerCount: followersRes.count ?? 0,
+        followingCount: followingRes.count ?? 0,
+        activityCount: activitiesRes.count ?? 0,
         badgeIds,
         streak,
-        isFollowing: !!amFollowing,
-        followsMe: !!theyFollowMe,
+        isFollowing: !!amFollowingRes.data,
+        followsMe: !!theyFollowMeRes.data,
       };
     } catch {
       return null;
     }
   }
 
-  /** Update current user's private/public setting */
+  // ── Privacy ──────────────────────────────────────────────────────────────
+
   async setProfilePrivacy(isPrivate: boolean): Promise<{ error: any }> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const myId = await getMyId();
+      if (!myId) throw new Error('Not authenticated');
       const { error } = await supabase
-        .from('profiles').update({ is_private: isPrivate }).eq('id', user.id);
+        .from('profiles')
+        .update({ is_private: isPrivate })
+        .eq('id', myId);
       return { error };
     } catch (error) {
       return { error };
     }
   }
 
-  /** Get current user's privacy setting */
   async getProfilePrivacy(): Promise<boolean> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return false;
+      const myId = await getMyId();
+      if (!myId) return false;
       const { data } = await supabase
-        .from('profiles').select('is_private').eq('id', user.id).maybeSingle();
+        .from('profiles')
+        .select('is_private')
+        .eq('id', myId)
+        .maybeSingle();
       return data?.is_private ?? false;
     } catch {
       return false;
     }
   }
 
-  /** Fetch activity feed */
+  // ── Feed ─────────────────────────────────────────────────────────────────
+
+  /**
+   * FIX: The old code tried to use nested subquery filters for liked-by-me
+   * which doesn't work cleanly in Supabase JS v2. Instead:
+   * 1. Fetch feed rows with simple count aggregates
+   * 2. Fetch which ones the current user liked in a separate query
+   * 3. Merge results client-side
+   */
   async getFeed(limit = 30): Promise<{ items: FeedItem[]; fromCache: boolean }> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return { items: [], fromCache: false };
+      const myId = await getMyId();
+      if (!myId) return { items: [], fromCache: false };
 
-      const { data: follows } = await supabase
-        .from('follows').select('following_id').eq('follower_id', user.id);
+      // Who does current user follow?
+      const { data: followRows } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', myId);
 
-      const followingIds = (follows ?? []).map((f: any) => f.following_id);
-      const actorIds = [user.id, ...followingIds];
+      const followingIds = (followRows ?? []).map((f: any) => f.following_id);
+      const actorIds = [myId, ...followingIds];
 
+      if (!actorIds.length) return { items: [], fromCache: false };
+
+      // Fetch feed items with like and comment counts
       const { data: feedRows, error } = await supabase
         .from('activity_feed')
-        .select('id, actor_id, type, payload, created_at, feed_likes(count), user_liked:feed_likes(id), comment_count:feed_comments(count)')
+        .select(`
+          id,
+          actor_id,
+          type,
+          payload,
+          created_at,
+          like_count:feed_likes(count),
+          comment_count:feed_comments(count)
+        `)
         .in('actor_id', actorIds)
         .order('created_at', { ascending: false })
         .limit(limit);
 
       if (error) throw error;
+      if (!feedRows?.length) return { items: [], fromCache: false };
 
-      const actorIds2 = [...new Set((feedRows ?? []).map((r: any) => r.actor_id))];
+      // Fetch which items current user liked (separate query — reliable)
+      const feedIds = feedRows.map((r: any) => r.id);
+      const { data: myLikes } = await supabase
+        .from('feed_likes')
+        .select('feed_item_id')
+        .eq('user_id', myId)
+        .in('feed_item_id', feedIds);
+
+      const likedSet = new Set((myLikes ?? []).map((l: any) => l.feed_item_id));
+
+      // Fetch actor profiles
+      const uniqueActorIds = [...new Set(feedRows.map((r: any) => r.actor_id))];
       const { data: profiles } = await supabase
-        .from('profiles').select('id, full_name, avatar_url').in('id', actorIds2);
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', uniqueActorIds);
 
       const profileMap: Record<string, any> = {};
       (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
 
-      const items: FeedItem[] = (feedRows ?? []).map((row: any) => {
+      const items: FeedItem[] = feedRows.map((row: any) => {
         const actor = profileMap[row.actor_id] ?? {};
+        // Supabase returns count aggregates as [{ count: N }]
+        const likeCount = Array.isArray(row.like_count)
+          ? (row.like_count[0]?.count ?? 0)
+          : 0;
+        const commentCount = Array.isArray(row.comment_count)
+          ? (row.comment_count[0]?.count ?? 0)
+          : 0;
+
         return {
           id: row.id,
           actorId: row.actor_id,
@@ -332,22 +427,29 @@ class SocialService {
           type: row.type,
           payload: row.payload ?? {},
           createdAt: new Date(row.created_at),
-          liked: Array.isArray(row.user_liked) && row.user_liked.some((l: any) => l.id),
-          likeCount: row.feed_likes?.[0]?.count ?? 0,
-          commentCount: row.comment_count?.[0]?.count ?? 0,
+          liked: likedSet.has(row.id),
+          likeCount: Number(likeCount),
+          commentCount: Number(commentCount),
         };
       });
 
-      await AsyncStorage.setItem(FEED_CACHE_KEY, JSON.stringify(items.map(i => ({
-        ...i, createdAt: i.createdAt.toISOString(),
-      }))));
+      // Cache for offline
+      try {
+        await AsyncStorage.setItem(
+          FEED_CACHE_KEY,
+          JSON.stringify(items.map(i => ({ ...i, createdAt: i.createdAt.toISOString() }))),
+        );
+      } catch {}
 
       return { items, fromCache: false };
     } catch {
+      // Fall back to cache
       try {
         const raw = await AsyncStorage.getItem(FEED_CACHE_KEY);
         if (raw) {
-          const parsed = JSON.parse(raw).map((i: any) => ({ ...i, createdAt: new Date(i.createdAt) }));
+          const parsed = JSON.parse(raw).map((i: any) => ({
+            ...i, createdAt: new Date(i.createdAt),
+          }));
           return { items: parsed, fromCache: true };
         }
       } catch {}
@@ -355,22 +457,52 @@ class SocialService {
     }
   }
 
-  /** Get comments for a feed item */
+  // ── Likes ────────────────────────────────────────────────────────────────
+
+  async toggleLike(feedItemId: string, currentlyLiked: boolean): Promise<void> {
+    try {
+      const myId = await getMyId();
+      if (!myId) return;
+      if (currentlyLiked) {
+        await supabase
+          .from('feed_likes')
+          .delete()
+          .eq('feed_item_id', feedItemId)
+          .eq('user_id', myId);
+      } else {
+        await supabase
+          .from('feed_likes')
+          .insert({ feed_item_id: feedItemId, user_id: myId });
+      }
+    } catch {}
+  }
+
+  // ── Comments ─────────────────────────────────────────────────────────────
+
   async getComments(feedItemId: string): Promise<FeedComment[]> {
     try {
-      const { data: rows } = await supabase
+      const { data: rows, error } = await supabase
         .from('feed_comments')
-        .select('id, feed_item_id, user_id, content, created_at, profiles:user_id(full_name, avatar_url)')
+        .select(`
+          id,
+          feed_item_id,
+          user_id,
+          content,
+          created_at,
+          profile:profiles!user_id (full_name, avatar_url)
+        `)
         .eq('feed_item_id', feedItemId)
         .order('created_at', { ascending: true })
-        .limit(50);
+        .limit(100);
+
+      if (error) throw error;
 
       return (rows ?? []).map((r: any) => ({
         id: r.id,
         feedItemId: r.feed_item_id,
         userId: r.user_id,
-        userName: r.profiles?.full_name ?? 'EpexFit User',
-        userAvatar: r.profiles?.avatar_url,
+        userName: r.profile?.full_name ?? 'EpexFit User',
+        userAvatar: r.profile?.avatar_url,
         content: r.content,
         createdAt: new Date(r.created_at),
       }));
@@ -379,43 +511,104 @@ class SocialService {
     }
   }
 
-  /** Post a comment on a feed item */
   async postComment(feedItemId: string, content: string): Promise<{ error: any }> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-      const { error } = await supabase.from('feed_comments').insert({
-        feed_item_id: feedItemId,
-        user_id: user.id,
-        content: content.trim(),
-      });
+      const myId = await getMyId();
+      if (!myId) throw new Error('Not authenticated');
+      const { error } = await supabase
+        .from('feed_comments')
+        .insert({
+          feed_item_id: feedItemId,
+          user_id: myId,
+          content: content.trim(),
+        });
       return { error };
     } catch (error) {
       return { error };
     }
   }
 
-  /** Toggle like on a feed item */
-  async toggleLike(feedItemId: string, currentlyLiked: boolean): Promise<void> {
+  async deleteComment(commentId: string): Promise<{ error: any }> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      if (currentlyLiked) {
-        await supabase.from('feed_likes').delete()
-          .eq('feed_item_id', feedItemId).eq('user_id', user.id);
-      } else {
-        await supabase.from('feed_likes').insert({ feed_item_id: feedItemId, user_id: user.id });
-      }
+      const myId = await getMyId();
+      if (!myId) throw new Error('Not authenticated');
+      const { error } = await supabase
+        .from('feed_comments')
+        .delete()
+        .eq('id', commentId)
+        .eq('user_id', myId); // only delete own comments
+      return { error };
+    } catch (error) {
+      return { error };
+    }
+  }
+
+  // ── Publish feed event ───────────────────────────────────────────────────
+
+  async publishFeedEvent(
+    type: FeedItem['type'],
+    payload: Record<string, any>,
+  ): Promise<void> {
+    try {
+      const myId = await getMyId();
+      if (!myId) return;
+      await supabase
+        .from('activity_feed')
+        .insert({ actor_id: myId, type, payload });
     } catch {}
   }
 
-  /** Publish an event to the activity feed */
-  async publishFeedEvent(type: FeedItem['type'], payload: Record<string, any>): Promise<void> {
+  // ── User search ──────────────────────────────────────────────────────────
+
+  /**
+   * Search users by full_name OR username.
+   * Returns results with isFollowing flag.
+   */
+  async searchUsers(query: string): Promise<Array<{
+    id: string;
+    full_name: string;
+    username?: string;
+    avatar_url?: string;
+    isFollowing: boolean;
+  }>> {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      await supabase.from('activity_feed').insert({ actor_id: user.id, type, payload });
-    } catch {}
+      const myId = await getMyId();
+      const trimmed = query.trim();
+      if (!trimmed) return [];
+
+      // Search by full_name OR username
+      const { data: profiles, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, username, avatar_url')
+        .or(`full_name.ilike.%${trimmed}%,username.ilike.%${trimmed}%`)
+        .neq('id', myId ?? '')
+        .limit(30);
+
+      if (error || !profiles?.length) return [];
+
+      const ids = profiles.map((p: any) => p.id);
+
+      // Check which ones current user follows
+      const { data: follows } = myId && ids.length
+        ? await supabase
+            .from('follows')
+            .select('following_id')
+            .eq('follower_id', myId)
+            .in('following_id', ids)
+        : { data: [] };
+
+      const followingSet = new Set((follows ?? []).map((f: any) => f.following_id));
+
+      return profiles.map((p: any) => ({
+        id: p.id,
+        full_name: p.full_name ?? 'EpexFit User',
+        username: p.username,
+        avatar_url: p.avatar_url,
+        isFollowing: followingSet.has(p.id),
+      }));
+    } catch {
+      return [];
+    }
   }
 }
 

@@ -1,9 +1,12 @@
 /**
- * UserSearchScreen — Find & follow other EpexFit users
+ * UserSearchScreen — Real Supabase user search
  *
- * Searches the `profiles` table by full_name.
- * Shows follow/unfollow buttons with optimistic UI.
- * Navigate here from SocialFeedScreen's empty state or header button.
+ * Fixes:
+ * - Searches both full_name AND username columns
+ * - Proper 400ms debounce
+ * - Shows username under name if available
+ * - Follow/unfollow with optimistic UI
+ * - Tap row to view profile
  */
 import React, { useState, useCallback, useRef } from 'react';
 import {
@@ -11,15 +14,15 @@ import {
   TouchableOpacity, Image, ActivityIndicator, Keyboard,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
-import { supabase } from '../../services/supabase';
 import { socialService } from '../../services/socialService';
 import { borderRadius, spacing } from '../../constants/theme';
 
 interface UserResult {
   id: string;
   full_name: string;
+  username?: string;
   avatar_url?: string;
   isFollowing: boolean;
   followLoading: boolean;
@@ -27,7 +30,6 @@ interface UserResult {
 
 export default function UserSearchScreen() {
   const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const accent = colors.primary;
 
@@ -39,40 +41,18 @@ export default function UserSearchScreen() {
 
   const searchUsers = useCallback(async (q: string) => {
     const trimmed = q.trim();
-    if (!trimmed) { setResults([]); setSearched(false); return; }
+    if (!trimmed) {
+      setResults([]);
+      setSearched(false);
+      return;
+    }
 
     setSearching(true);
     setSearched(true);
+
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, full_name, avatar_url')
-        .ilike('full_name', `%${trimmed}%`)
-        .neq('id', me?.id ?? '')
-        .limit(30);
-
-      const ids = (profiles ?? []).map((p: any) => p.id);
-
-      // Check which ones current user already follows
-      const { data: follows } = ids.length > 0
-        ? await supabase
-            .from('follows')
-            .select('following_id')
-            .eq('follower_id', me?.id ?? '')
-            .in('following_id', ids)
-        : { data: [] };
-
-      const followingSet = new Set((follows ?? []).map((f: any) => f.following_id));
-
-      setResults((profiles ?? []).map((p: any) => ({
-        id: p.id,
-        full_name: p.full_name ?? 'EpexFit User',
-        avatar_url: p.avatar_url,
-        isFollowing: followingSet.has(p.id),
-        followLoading: false,
-      })));
+      const found = await socialService.searchUsers(trimmed);
+      setResults(found.map(u => ({ ...u, followLoading: false })));
     } catch {
       setResults([]);
     } finally {
@@ -86,10 +66,16 @@ export default function UserSearchScreen() {
     debounceRef.current = setTimeout(() => searchUsers(text), 400);
   };
 
+  const handleClear = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setQuery('');
+    setResults([]);
+    setSearched(false);
+  };
+
   const handleFollowToggle = async (userId: string, currentlyFollowing: boolean) => {
-    // Optimistic update
     setResults(prev =>
-      prev.map(u => u.id === userId ? { ...u, followLoading: true } : u)
+      prev.map(u => u.id === userId ? { ...u, followLoading: true } : u),
     );
 
     if (currentlyFollowing) {
@@ -102,13 +88,17 @@ export default function UserSearchScreen() {
       prev.map(u =>
         u.id === userId
           ? { ...u, isFollowing: !currentlyFollowing, followLoading: false }
-          : u
-      )
+          : u,
+      ),
     );
   };
 
   const renderUser = ({ item }: { item: UserResult }) => (
-    <View style={[card.row, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+    <TouchableOpacity
+      style={[card.row, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+      onPress={() => navigation.navigate('UserProfile', { userId: item.id, userName: item.full_name })}
+      activeOpacity={0.8}
+    >
       {item.avatar_url ? (
         <Image source={{ uri: item.avatar_url }} style={[card.avatar, { borderColor: colors.border }]} />
       ) : (
@@ -121,7 +111,11 @@ export default function UserSearchScreen() {
 
       <View style={{ flex: 1 }}>
         <Text style={[card.name, { color: colors.text }]}>{item.full_name}</Text>
-        <Text style={[card.sub, { color: colors.textSecondary }]}>EpexFit Athlete</Text>
+        {item.username ? (
+          <Text style={[card.username, { color: colors.textSecondary }]}>@{item.username}</Text>
+        ) : (
+          <Text style={[card.username, { color: colors.textSecondary }]}>EpexFit Athlete</Text>
+        )}
       </View>
 
       <TouchableOpacity
@@ -144,13 +138,13 @@ export default function UserSearchScreen() {
           </Text>
         )}
       </TouchableOpacity>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={['top']}>
       {/* Header */}
-      <View style={[s.header, { }]}>
+      <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
           <Text style={[s.backText, { color: accent }]}>← Back</Text>
         </TouchableOpacity>
@@ -162,22 +156,23 @@ export default function UserSearchScreen() {
         <Text style={{ fontSize: 16 }}>🔍</Text>
         <TextInput
           style={[s.searchInput, { color: colors.text }]}
-          placeholder="Search by name…"
+          placeholder="Search by name or @username…"
           placeholderTextColor={colors.textSecondary}
           value={query}
           onChangeText={handleQueryChange}
           autoFocus
           returnKeyType="search"
           onSubmitEditing={() => { Keyboard.dismiss(); searchUsers(query); }}
+          autoCapitalize="none"
+          autoCorrect={false}
         />
         {query.length > 0 && (
-          <TouchableOpacity onPress={() => { setQuery(''); setResults([]); setSearched(false); }}>
-            <Text style={{ color: colors.textSecondary, fontSize: 18 }}>×</Text>
+          <TouchableOpacity onPress={handleClear} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 18, fontWeight: '700' }}>×</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Results */}
       {searching ? (
         <View style={s.center}>
           <ActivityIndicator size="large" color={accent} />
@@ -195,14 +190,16 @@ export default function UserSearchScreen() {
               <View style={s.center}>
                 <Text style={{ fontSize: 40 }}>🔎</Text>
                 <Text style={[s.emptyTitle, { color: colors.text }]}>No users found</Text>
-                <Text style={[s.hint, { color: colors.textSecondary }]}>Try a different name</Text>
+                <Text style={[s.hint, { color: colors.textSecondary }]}>
+                  Try a different name or username
+                </Text>
               </View>
             ) : (
               <View style={s.center}>
                 <Text style={{ fontSize: 40 }}>👥</Text>
-                <Text style={[s.emptyTitle, { color: colors.text }]}>Search EpexFit athletes</Text>
+                <Text style={[s.emptyTitle, { color: colors.text }]}>Find EpexFit athletes</Text>
                 <Text style={[s.hint, { color: colors.textSecondary }]}>
-                  Type a name to find people to follow
+                  Search by name or @username
                 </Text>
               </View>
             )
@@ -220,10 +217,13 @@ const card = StyleSheet.create({
     padding: 14, marginBottom: 10,
   },
   avatar: { width: 46, height: 46, borderRadius: 23, borderWidth: 1.5 },
-  avatarFallback: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  avatarFallback: {
+    width: 46, height: 46, borderRadius: 23,
+    alignItems: 'center', justifyContent: 'center',
+  },
   avatarLetter: { fontSize: 20, fontWeight: '800' },
   name: { fontSize: 15, fontWeight: '800' },
-  sub: { fontSize: 12, marginTop: 2 },
+  username: { fontSize: 12, marginTop: 2 },
   followBtn: {
     paddingHorizontal: 16, paddingVertical: 8,
     borderRadius: 20, borderWidth: 1.5,
