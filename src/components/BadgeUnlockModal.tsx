@@ -4,7 +4,7 @@
  * Shows badge icon, name, description with pulsing animation.
  * Call via the useBadgeCelebration hook.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Component, useEffect, useRef, useState } from 'react';
 import {
   Modal, View, Text, StyleSheet, TouchableOpacity, Animated, Vibration,
 } from 'react-native';
