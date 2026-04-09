@@ -277,12 +277,12 @@ export default function SocialFeedScreen() {
   return (
     <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={['top']}>
       <View style={s.header}>
-        <View>
-          <Text style={[s.title, { color: colors.text }]}>Community</Text>
-          <Text style={[s.sub, { color: colors.textSecondary }]}>
-            Activity from people you follow
-          </Text>
-        </View>
+        <View style={{ flex: 1, marginRight: 8 }}>
+  <Text style={[s.title, { color: colors.text }]}>Community</Text>
+  <Text style={[s.sub, { color: colors.textSecondary }]}>
+    Activity from people you follow
+  </Text>
+</View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           {fromCache && (
             <View style={[s.cacheBadge, { backgroundColor: '#FF950018', borderColor: '#FF950040' }]}>
@@ -393,9 +393,10 @@ const fc = StyleSheet.create({
 const s = StyleSheet.create({
   container: { flex: 1 },
   header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: spacing.md, paddingBottom: 12,
-  },
+  flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  paddingHorizontal: spacing.md, paddingBottom: 12,
+  paddingRight: spacing.md, // already tha — asli fix neeche hai
+},
   title: { fontSize: 28, fontWeight: '900', letterSpacing: -1 },
   sub: { fontSize: 13, marginTop: 2 },
   cacheBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1 },

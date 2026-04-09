@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
+import { decode } from 'base64-arraybuffer';
 
 const BUCKET_NAME = 'activity-photos';
 
@@ -141,11 +142,11 @@ export class StorageService {
       }
 
       const { error } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, fileData, {
-          contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
-          upsert: true, // overwrite existing avatar
-        });
+  .from('avatars')
+  .upload(fileName, decode(fileData as string), {
+    contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
+    upsert: true,
+  });
 
       if (error) throw error;
 

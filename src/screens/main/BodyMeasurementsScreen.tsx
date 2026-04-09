@@ -163,21 +163,20 @@ export default function BodyMeasurementsScreen({ navigation }: any) {
   };
 
   // Parse form to payload
-  const buildPayload = (f: FormState) => {
-    const weight   = parseFloat(f.weight)   || null;
-    const height   = parseFloat(f.height)   || null;
-    const bmi      = computeBMI(weight, height);
-    return {
-      weight,
-      height,
-      bmi,
-      body_fat: parseFloat(f.body_fat) || null,
-      chest:    parseFloat(f.chest)    || null,
-      waist:    parseFloat(f.waist)    || null,
-      arms:     parseFloat(f.arms)     || null,
-      legs:     parseFloat(f.legs)     || null,
-    };
+const buildPayload = (f: FormState) => {
+  const weight = parseFloat(f.weight) || null;
+  const height = parseFloat(f.height) || null;
+  // bmi mat bhejo — DB khud calculate karta hai
+  return {
+    weight,
+    height,
+    body_fat: parseFloat(f.body_fat) || null,
+    chest:    parseFloat(f.chest)    || null,
+    waist:    parseFloat(f.waist)    || null,
+    arms:     parseFloat(f.arms)     || null,
+    legs:     parseFloat(f.legs)     || null,
   };
+};
 
   const openAdd = () => {
     // Pre-fill height from latest entry
