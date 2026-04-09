@@ -86,7 +86,7 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.epexfit"
+    namespace "com.epexlogics.epexfit"
     defaultConfig {
         applicationId 'com.epexlogics.epexfit'
         minSdkVersion rootProject.ext.minSdkVersion
