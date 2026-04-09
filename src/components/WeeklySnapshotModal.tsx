@@ -1,14 +1,14 @@
 /**
  * Weekly snapshot — glassy sheet, cyan primary CTA, soft-rose calorie row.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, Component, useState } from 'react';
 import { Modal, View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import dayjs from '../utils/dayjs';
 import { useTheme } from '../context/ThemeContext';
 
 // ── Modal-scoped Error Boundary ─────────────────────────────────────────────
-import { Component } from 'react';
+
 class ModalErrorBoundary extends Component<
   { children: React.ReactNode },
   { hasError: boolean }
