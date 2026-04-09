@@ -131,7 +131,7 @@ export default function ImportScreen() {
     }
     setStravaLoading(true);
     try {
-      const redirectUri = makeRedirectUri({ scheme: 'epexfit', path: 'strava/exchange_token' })
+      const redirectUri = makeRedirectUri({ scheme: 'epexfit', path: 'strava' });
       const authUrl =
         `${STRAVA_AUTH_URL}?client_id=${STRAVA_CLIENT_ID}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
