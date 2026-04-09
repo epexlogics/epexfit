@@ -772,9 +772,14 @@ export default function HomeScreen({ navigation }: any) {
       const completedWorkoutsThisWeek = weeklyWorkoutCount;
 
       // ── Insight ───────────────────────────────────────────────────────────
+      const weeklySteps = await databaseService.getWeeklyStepsByDay(user.id, new Date(weekStart));
+      const bestDaySteps = Array.isArray(weeklySteps) && weeklySteps.length > 0
+        ? Math.max(...weeklySteps)
+        : 0;
+
       const insight = generateInsight({
         avgSleepHours: sleepHours,
-        bestDaySteps: Math.max(...(await databaseService.getWeeklyStepsByDay(user.id, new Date(weekStart)))),
+        bestDaySteps,
         weeklyStepsChange: 0, // would require prev week, skip for now
         currentStreak,
         waterToday,
