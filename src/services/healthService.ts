@@ -1,17 +1,12 @@
 /**
  * healthService.ts
  *
- * Real HealthKit (iOS) / Google Fit (Android) integration.
+ * Real HealthKit (iOS) / Google Fit (Android) integration via expo-sensors Pedometer.
  *
- * Implementation strategy:
- *  - expo-sensors Pedometer.watchStepCount() ──► live step count from CoreMotion / Google Fit
- *  - expo-sensors Pedometer.getStepCountAsync() ──► historical steps for today
- *
- * This is the approved Expo managed-workflow path — no bare native module required,
- * works with EAS Build out of the box, and pulls real data from both platforms.
- *
- * iOS:  reads from HealthKit (requires NSHealthUpdateUsageDescription + NSHealthShareUsageDescription in app.json)
- * Android: reads from Google Fit step sensor (requires android.permission.ACTIVITY_RECOGNITION)
+ * FIX #18: Now explicitly calls Pedometer.requestPermissionsAsync() before any
+ * step-count operation. On iOS, calling the pedometer without CMMotionActivity
+ * permission granted returns 0 steps silently — the permission request ensures
+ * the OS prompt appears and the user can grant access.
  */
 
 import { Pedometer } from 'expo-sensors';
@@ -28,14 +23,27 @@ export interface HealthSyncResult {
 class HealthService {
   private _subscription: ReturnType<typeof Pedometer.watchStepCount> | null = null;
   private _liveSteps = 0;
-  private _stepBase = 0; // steps at tracking start, so we get delta
-  private _onStepUpdate: ((steps: number) => void) | null = null;
+  private _permissionGranted: boolean | null = null;
 
-  /** Check whether HealthKit / Google Fit is available on this device */
+  /** Request motion/activity permission, then check hardware availability. */
+  async requestAndCheckPermission(): Promise<boolean> {
+    try {
+      // Request permission first — iOS shows the NSMotionUsageDescription prompt here
+      const { status } = await Pedometer.requestPermissionsAsync();
+      this._permissionGranted = status === 'granted';
+      if (!this._permissionGranted) return false;
+
+      const available = await Pedometer.isAvailableAsync();
+      return available;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Check whether HealthKit / Google Fit is available (no permission request). */
   async isAvailable(): Promise<boolean> {
     try {
-      const result = await Pedometer.isAvailableAsync();
-      return result;
+      return await Pedometer.isAvailableAsync();
     } catch {
       return false;
     }
@@ -43,14 +51,14 @@ class HealthService {
 
   /**
    * Pull today's step count from HealthKit / Google Fit.
-   * Falls back to AsyncStorage cache if unavailable (offline / permission denied).
+   * Requests permission first, falls back to cache on denial or offline.
    */
   async getTodaySteps(): Promise<HealthSyncResult> {
     try {
-      const available = await this.isAvailable();
+      const available = await this.requestAndCheckPermission();
       if (!available) {
         const cached = await this._getCachedSteps();
-        return { steps: cached, available: false, source: 'cached' };
+        return { steps: cached, available: false, source: cached > 0 ? 'cached' : 'none' };
       }
 
       const start = new Date();
@@ -60,14 +68,9 @@ class HealthService {
       const result = await Pedometer.getStepCountAsync(start, end);
       const steps = result?.steps ?? 0;
 
-      // Persist for offline fallback
       await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({ steps, date: new Date().toISOString() }));
 
-      return {
-        steps,
-        available: true,
-        source: this._detectPlatformSource(),
-      };
+      return { steps, available: true, source: this._detectPlatformSource() };
     } catch {
       const cached = await this._getCachedSteps();
       return { steps: cached, available: false, source: 'cached' };
@@ -76,18 +79,22 @@ class HealthService {
 
   /**
    * Start a live step-count subscription for the active workout.
-   * Calls onUpdate(totalSteps) every time steps change.
+   * Requests permission before subscribing.
    */
-  startLiveTracking(onUpdate: (steps: number) => void): void {
+  async startLiveTracking(onUpdate: (steps: number) => void): Promise<boolean> {
     this.stopLiveTracking();
-    this._onStepUpdate = onUpdate;
+
+    const granted = await this.requestAndCheckPermission();
+    if (!granted) return false;
+
     this._liveSteps = 0;
-    this._stepBase = 0;
 
     this._subscription = Pedometer.watchStepCount((result) => {
       this._liveSteps = result.steps;
       onUpdate(this._liveSteps);
     });
+
+    return true;
   }
 
   stopLiveTracking(): void {
@@ -95,7 +102,6 @@ class HealthService {
       this._subscription.remove();
       this._subscription = null;
     }
-    this._onStepUpdate = null;
     this._liveSteps = 0;
   }
 
@@ -113,7 +119,6 @@ class HealthService {
       const raw = await AsyncStorage.getItem(CACHE_KEY);
       if (!raw) return 0;
       const parsed = JSON.parse(raw);
-      // Only use today's cache
       const cacheDate = new Date(parsed.date).toDateString();
       const today = new Date().toDateString();
       return cacheDate === today ? (parsed.steps ?? 0) : 0;

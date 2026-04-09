@@ -165,7 +165,27 @@ export default function App() {
 
   const linking = {
     prefixes: [prefix, 'epexfit://'],
-    config: { screens: {} },
+    config: {
+      screens: {
+        // Deep-link: epexfit://reset-password  → ResetPasswordScreen
+        ResetPassword: {
+          path: 'reset-password',
+        },
+        // Deep-link: epexfit://auth/callback   → handled in handleDeepLink above
+        Auth: {
+          screens: {
+            Login: 'login',
+            Register: 'register',
+            ForgotPassword: 'forgot-password',
+          },
+        },
+        Main: {
+          screens: {
+            HomeTab: 'home',
+          },
+        },
+      },
+    },
   };
 
   return (

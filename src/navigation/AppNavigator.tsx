@@ -3,10 +3,10 @@
  *
  * FIXES APPLIED:
  * 1. onboarding_complete now read from Supabase profiles table directly
- *    (previously relying on user object that never had this field, and
- *    AsyncStorage which gets wiped on signOut — causing onboarding every login)
  * 2. Onboarding screen has gestureEnabled: false + Android hardware back disabled
  * 3. Added Settings screen to root stack (accessible from ProfileScreen)
+ * 4. Added ResetPassword screen + deep-link route for epexfit://reset-password
+ * 5. Populated linking.config.screens so named routes are actually deep-linkable
  */
 import React, { useEffect, useState } from 'react';
 import { BackHandler } from 'react-native';
@@ -21,6 +21,7 @@ import MainNavigator from './MainNavigator';
 import SplashScreen from '../screens/SplashScreen';
 import OnboardingScreen from '../screens/onboarding/OnboardingScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import ResetPasswordScreen from '../screens/auth/ResetPasswordScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -56,10 +57,6 @@ export default function AppNavigator() {
       return;
     }
 
-    // Query Supabase profiles directly — this is the source of truth.
-    // The user object from AuthContext does NOT include onboarding_complete
-    // (getCurrentUser() doesn't select it), and AsyncStorage gets wiped on
-    // signOut(), so neither can be trusted without this direct DB check.
     Promise.resolve(
       supabase
         .from('profiles')
@@ -71,13 +68,9 @@ export default function AppNavigator() {
         if (data?.onboarding_complete === true) {
           setOnboardingDone(true);
         } else {
-          // Fallback: check AsyncStorage for users who completed onboarding
-          // before the DB column was added (backwards compatibility)
           AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING).then((val) => {
             if (val === 'complete') {
-              // Back-fill the DB so future logins skip this fallback
               void supabase.from('profiles').update({ onboarding_complete: true }).eq('id', user.id);
-
               setOnboardingDone(true);
             } else {
               setOnboardingDone(false);
@@ -86,7 +79,6 @@ export default function AppNavigator() {
         }
       })
       .catch(() => {
-        // DB unreachable — fall back to AsyncStorage
         AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING).then((val) => {
           setOnboardingDone(val === 'complete');
         });
@@ -98,7 +90,16 @@ export default function AppNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {!user ? (
-        <Stack.Screen name="Auth" component={AuthNavigator} />
+        <>
+          <Stack.Screen name="Auth" component={AuthNavigator} />
+          {/* ResetPassword is accessible even without a session — the user
+              arrives here via the email deep-link before the session is set */}
+          <Stack.Screen
+            name="ResetPassword"
+            component={ResetPasswordScreen}
+            options={{ animation: 'slide_from_bottom', gestureEnabled: false }}
+          />
+        </>
       ) : !onboardingDone ? (
         <Stack.Screen
           name="Onboarding"
@@ -115,6 +116,12 @@ export default function AppNavigator() {
             name="Settings"
             component={SettingsScreen}
             options={{ animation: 'slide_from_right' }}
+          />
+          {/* ResetPassword also accessible when logged in (password change) */}
+          <Stack.Screen
+            name="ResetPassword"
+            component={ResetPasswordScreen}
+            options={{ animation: 'slide_from_bottom', gestureEnabled: false }}
           />
         </>
       )}

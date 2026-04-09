@@ -7,6 +7,7 @@ export interface User {
   weight?: number;
   dateOfBirth?: Date;
   gender?: 'male' | 'female' | 'other';
+  onboarding_complete?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

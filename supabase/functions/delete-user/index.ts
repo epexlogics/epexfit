@@ -1,69 +1,95 @@
-// supabase/functions/delete-user/index.ts
-// Supabase automatically injects SUPABASE_SERVICE_ROLE_KEY — no manual secret needed.
+/**
+ * delete-user — Supabase Edge Function
+ *
+ * Permanently deletes a Supabase Auth user by ID.
+ * Required by Apple App Store & Google Play data deletion policies.
+ *
+ * Uses the Supabase service_role key (admin privilege) which must NEVER
+ * be in the app bundle — hence the Edge Function pattern.
+ *
+ * Deploy:
+ *   supabase functions deploy delete-user
+ *   (The SUPABASE_SERVICE_ROLE_KEY is auto-injected by Supabase at runtime)
+ *
+ * Request body: { userId: string }
+ * Response:     { success: true } | { error: string }
+ */
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const CORS_HEADERS = {
+const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-serve(async (req: Request) => {
+serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: CORS_HEADERS });
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
+    // Verify the caller is authenticated (they must be deleting their own account)
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
-        status: 401,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ error: 'Missing authorization header' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    // Verify the caller is a real logged-in user
-    const anonClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } },
-    );
-
-    const { data: { user }, error: authError } = await anonClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      });
+    const { userId } = await req.json();
+    if (!userId) {
+      return new Response(
+        JSON.stringify({ error: 'Missing required field: userId' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    const { userId } = await req.json() as { userId: string };
+    // Verify the requester is deleting their own account
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-    // Only allow deleting own account
-    if (userId !== user.id) {
-      return new Response(JSON.stringify({ error: 'Forbidden' }), {
-        status: 403,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      });
+    // Verify the JWT belongs to the userId being deleted
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user: callerUser }, error: callerErr } = await userClient.auth.getUser();
+    if (callerErr || !callerUser) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid auth token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    if (callerUser.id !== userId) {
+      return new Response(
+        JSON.stringify({ error: 'You can only delete your own account' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    // SUPABASE_SERVICE_ROLE_KEY is injected automatically by Supabase — no manual set needed
-    const adminClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-    );
+    // Use admin client to delete the auth user
+    const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
 
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(userId);
-    if (deleteError) throw deleteError;
+    if (deleteError) {
+      return new Response(
+        JSON.stringify({ error: `Failed to delete user: ${deleteError.message}` }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-    });
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message ?? 'Unknown error' }), {
-      status: 500,
-      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({ success: true }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: String(err) }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 });

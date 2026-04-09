@@ -8,8 +8,9 @@
     "userInterfaceStyle": "automatic",
     "scheme": "epexfit",
     "owner": "epexlogicsllc",
-    "assetBundlePatterns": ["**/*"],
-
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "plugins": [
       [
         "expo-splash-screen",
@@ -52,15 +53,14 @@
       ],
       "expo-asset"
     ],
-
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.epexlogics.epexfit",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "EpexFit uses your location to track routes during activities.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "EpexFit tracks your route in the background during active workouts.",
-        "NSHealthShareUsageDescription": "EpexFit reads steps, sleep and heart rate from Apple Health.",
-        "NSHealthUpdateUsageDescription": "EpexFit writes workout data to Apple Health.",
+        "NSHealthShareUsageDescription": "EpexFit reads steps and activity data from Apple Health to display your fitness stats.",
+        "NSHealthUpdateUsageDescription": "EpexFit writes workout sessions to Apple Health so your activities appear in your health records.",
         "NSCameraUsageDescription": "EpexFit uses the camera for workout photo logs.",
         "NSPhotoLibraryUsageDescription": "EpexFit accesses photos for workout logs.",
         "NSMotionUsageDescription": "EpexFit uses motion sensors to count your steps automatically."
@@ -69,7 +69,6 @@
         "com.apple.developer.healthkit": true
       }
     },
-
     "android": {
       "package": "com.epexlogics.epexfit",
       "minSdkVersion": 26,
@@ -84,24 +83,19 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.ACTIVITY_RECOGNITION"
+        "android.permission.ACTIVITY_RECOGNITION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
       ]
     },
-
     "web": {
       "favicon": "./src/assets/favicon.png"
     },
-
     "extra": {
       "eas": {
         "projectId": "e8ddc421-97df-4159-a41c-989fe527619d"
-      },
-      "supabaseUrl": "https://yvmlnwoppiosbphfcmhe.supabase.co",
-      "supabaseAnonKey": "sb_publishable_sWuulMgNfzQP0ZyyZgYmxA_KwujyxZt"
+      }
     }
   }
 }

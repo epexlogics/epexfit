@@ -161,6 +161,50 @@ function getNutrient(food: unknown, name: string): number {
   return Math.round((n?.value ?? 0) * 10) / 10;
 }
 
+/**
+ * Get energy in kcal specifically.
+ * USDA FDC returns multiple energy entries:
+ *   "Energy" (kcal), "Energy (Atwater General Factors)" (kcal),
+ *   "Energy (Atwater Specific Factors)" (kcal), "Energy" (kJ).
+ * We must find the kcal entry, not kJ. Prefer the plain "Energy" entry
+ * with unit kcal, falling back to any entry that contains "energy" and
+ * has a value consistent with kcal (>10 suggests kcal not kJ for real foods).
+ */
+function getCaloriesKcal(food: unknown): number {
+  const f = food as {
+    foodNutrients?: Array<{ nutrientName?: string; unitName?: string; value?: number }>;
+  };
+  const nutrients = f.foodNutrients ?? [];
+
+  // 1. Prefer exact match: nutrientName === "Energy" AND unitName === "KCAL"
+  const exact = nutrients.find(
+    (x) =>
+      x.nutrientName?.toLowerCase() === 'energy' &&
+      x.unitName?.toLowerCase() === 'kcal'
+  );
+  if (exact?.value != null) return Math.round(exact.value);
+
+  // 2. Any nutrient with "energy" in name and unit kcal
+  const byUnit = nutrients.find(
+    (x) =>
+      x.nutrientName?.toLowerCase().includes('energy') &&
+      x.unitName?.toLowerCase() === 'kcal'
+  );
+  if (byUnit?.value != null) return Math.round(byUnit.value);
+
+  // 3. Fallback: any "energy" entry — if value looks like kJ (>600 for typical food)
+  // convert: 1 kcal = 4.184 kJ
+  const anyEnergy = nutrients.find((x) => x.nutrientName?.toLowerCase().includes('energy'));
+  if (anyEnergy?.value != null) {
+    const v = anyEnergy.value;
+    // If kJ (values typically 200-3000 range per 100g for real food)
+    // kcal values are ~4x smaller. Heuristic: if >800 it's almost certainly kJ
+    return Math.round(v > 800 ? v / 4.184 : v);
+  }
+
+  return 0;
+}
+
 function getFiber(food: unknown): number {
   const f = food as { foodNutrients?: Array<{ nutrientName?: string; value?: number }> };
   const n = f.foodNutrients?.find((x) => {
@@ -224,7 +268,7 @@ export function useFoodSearch(): UseFoodSearchResult {
             id: String(f.fdcId),
             name: f.description || 'Unknown Food',
             brand: f.brandOwner || f.brandName,
-            caloriesPer100g: getNutrient(f, 'Energy'),
+            caloriesPer100g: getCaloriesKcal(f),
             proteinPer100g:  getNutrient(f, 'Protein'),
             carbsPer100g:    getNutrient(f, 'Carbohydrate'),
             fatPer100g:      getNutrient(f, 'Total lipid'),

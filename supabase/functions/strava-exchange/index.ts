@@ -1,77 +1,46 @@
 /**
  * strava-exchange — Supabase Edge Function
  *
- * Exchanges a Strava authorization code for an access token.
- * The client_secret lives ONLY here as a Supabase secret — never in the app bundle.
+ * Exchanges a Strava authorization code for access + refresh tokens.
+ * The client_secret is stored as a Supabase secret (never in the app bundle).
  *
  * Deploy:
+ *   supabase secrets set STRAVA_CLIENT_SECRET=your_secret_here
  *   supabase functions deploy strava-exchange
  *
- * Set secret:
- *   supabase secrets set STRAVA_CLIENT_SECRET=your_secret_here
- *
- * The app calls:
- *   POST <SUPABASE_URL>/functions/v1/strava-exchange
- *   Authorization: Bearer <supabase_user_jwt>
- *   Body: { code: string, client_id: string }
+ * Request body: { code: string, client_id: string }
+ * Response:     { access_token: string, refresh_token: string, athlete_id: number }
  */
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 
-const CORS_HEADERS = {
+const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-serve(async (req: Request) => {
+serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: CORS_HEADERS });
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    // ── 1. Verify the caller is an authenticated EpexFit user ──────────────
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
-        status: 401,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      });
-    }
-
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } },
-    );
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // ── 2. Parse request body ──────────────────────────────────────────────
-    const { code, client_id } = await req.json() as { code: string; client_id: string };
+    const { code, client_id } = await req.json();
 
     if (!code || !client_id) {
-      return new Response(JSON.stringify({ error: 'code and client_id are required' }), {
-        status: 400,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ error: 'Missing required fields: code, client_id' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    // ── 3. Exchange code for token (secret never leaves the server) ────────
     const clientSecret = Deno.env.get('STRAVA_CLIENT_SECRET');
     if (!clientSecret) {
-      console.error('STRAVA_CLIENT_SECRET env var not set');
-      return new Response(JSON.stringify({ error: 'Server configuration error' }), {
-        status: 500,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ error: 'STRAVA_CLIENT_SECRET not configured. Run: supabase secrets set STRAVA_CLIENT_SECRET=...' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const tokenRes = await fetch('https://www.strava.com/oauth/token', {
@@ -87,28 +56,26 @@ serve(async (req: Request) => {
 
     if (!tokenRes.ok) {
       const errText = await tokenRes.text();
-      console.error('Strava token exchange failed:', tokenRes.status, errText);
-      return new Response(JSON.stringify({ error: `Strava error: ${tokenRes.status}` }), {
-        status: tokenRes.status,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ error: `Strava token exchange failed: ${tokenRes.status}`, detail: errText }),
+        { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    const tokenData = await tokenRes.json();
+    const tokenJson = await tokenRes.json();
 
-    // ── 4. Return only the access_token to the app ─────────────────────────
     return new Response(
-      JSON.stringify({ access_token: tokenData.access_token }),
-      {
-        status: 200,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      },
+      JSON.stringify({
+        access_token: tokenJson.access_token,
+        refresh_token: tokenJson.refresh_token,
+        athlete_id: tokenJson.athlete?.id,
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err) {
-    console.error('strava-exchange error:', err);
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
-      status: 500,
-      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({ error: String(err) }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 });

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User } from '../types';
 import { authService } from '../services/auth';
+import { clearAuthUserCache } from '../services/database';
 import { supabase } from '../services/supabase';
 
 interface AuthContextType {
@@ -30,9 +31,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       listenerFiredRef.current = true;
 
       if (session?.user) {
-        setIsLoading(false);
+        // FIX: Resolve user BEFORE clearing isLoading to prevent a flash of
+        // the unauthenticated state (screens checking !user would briefly
+        // redirect to auth while getCurrentUser() was still in-flight).
         authService.getCurrentUser().then((currentUser) => {
           setUser(currentUser);
+          setIsLoading(false);
+        }).catch(() => {
+          setUser(null);
+          setIsLoading(false);
         });
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
@@ -108,6 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     try {
       await authService.signOut();
+      clearAuthUserCache(); // Immediately invalidate DB-layer auth cache
       setUser(null);
     } catch (err: any) {
       setError(err.message);

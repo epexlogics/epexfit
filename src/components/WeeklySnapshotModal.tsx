@@ -7,6 +7,22 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import dayjs from '../utils/dayjs';
 import { useTheme } from '../context/ThemeContext';
 
+// ── Modal-scoped Error Boundary ─────────────────────────────────────────────
+import { Component } from 'react';
+class ModalErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(e: Error) { console.warn('[WeeklySnapshotModal] render error:', e.message); }
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}
+
+
 const SNAPSHOT_KEY = '@epexfit_last_snapshot_week';
 
 interface SnapshotData {
@@ -25,7 +41,7 @@ interface Props {
   onDismiss: () => void;
 }
 
-export default function WeeklySnapshotModal({ data, onDismiss }: Props) {
+function WeeklySnapshotModalInner({ data, onDismiss }: Props) {
   const { colors } = useTheme();
   const slideAnim = useState(() => new Animated.Value(400))[0];
   const opacityAnim = useState(() => new Animated.Value(0))[0];
@@ -197,3 +213,11 @@ const styles = StyleSheet.create({
   closeBtn: { height: 54, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   closeBtnText: { fontWeight: '900', fontSize: 16 },
 });
+
+export default function WeeklySnapshotModal(props: Parameters<typeof WeeklySnapshotModalInner>[0]) {
+  return (
+    <ModalErrorBoundary>
+      <WeeklySnapshotModalInner {...props} />
+    </ModalErrorBoundary>
+  );
+}

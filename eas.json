@@ -9,7 +9,7 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://yvmlnwoppiosbphfcmhe.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_sWuulMgNfzQP0ZyyZgYmxA_KwujyxZt",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_Piev8Q8GrxJBgqvPnWhmfA_nZniYBw6",
         "EXPO_PUBLIC_USDA_API_KEY": "7lffKJ01S78zzdI3o6SPVy0pTfUz61HfRq8nTLsI",
         "EXPO_PUBLIC_STRAVA_CLIENT_ID": "222069",
         "EXPO_PUBLIC_SENTRY_DSN": "https://9af87b1b31fe943b27feb4b9cb56d68b@o4511186399068160.ingest.us.sentry.io/4511186415648768"
@@ -19,7 +19,7 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://yvmlnwoppiosbphfcmhe.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_sWuulMgNfzQP0ZyyZgYmxA_KwujyxZt",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_Piev8Q8GrxJBgqvPnWhmfA_nZniYBw6",
         "EXPO_PUBLIC_USDA_API_KEY": "7lffKJ01S78zzdI3o6SPVy0pTfUz61HfRq8nTLsI",
         "EXPO_PUBLIC_STRAVA_CLIENT_ID": "222069",
         "EXPO_PUBLIC_SENTRY_DSN": "https://9af87b1b31fe943b27feb4b9cb56d68b@o4511186399068160.ingest.us.sentry.io/4511186415648768"
@@ -29,7 +29,7 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://yvmlnwoppiosbphfcmhe.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_sWuulMgNfzQP0ZyyZgYmxA_KwujyxZt",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_Piev8Q8GrxJBgqvPnWhmfA_nZniYBw6",
         "EXPO_PUBLIC_USDA_API_KEY": "7lffKJ01S78zzdI3o6SPVy0pTfUz61HfRq8nTLsI",
         "EXPO_PUBLIC_STRAVA_CLIENT_ID": "222069",
         "EXPO_PUBLIC_SENTRY_DSN": "https://9af87b1b31fe943b27feb4b9cb56d68b@o4511186399068160.ingest.us.sentry.io/4511186415648768"

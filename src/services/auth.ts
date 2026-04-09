@@ -129,6 +129,17 @@ export class AuthService {
   async signInWithGoogle(): Promise<{ user: User | null; error: any }> {
     try {
       const redirectTo = AuthSession.makeRedirectUri({ scheme: 'epexfit', path: 'auth/callback' });
+      // IMPORTANT: This redirectTo URI must be registered in Google Cloud Console:
+      //   APIs & Services → Credentials → OAuth 2.0 Client → Authorized redirect URIs
+      // The value will be something like: epexfit://auth/callback
+      // Without this, every sign-in attempt fails with redirect_uri_mismatch.
+      // Also register in Supabase: Authentication → URL Configuration → Redirect URLs
+      if (__DEV__) {
+        console.log('[Google OAuth] redirect URI:', redirectTo);
+        console.log('[Google OAuth] Ensure this URI is registered in:');
+        console.log('  1. Google Cloud Console OAuth credentials');
+        console.log('  2. Supabase Auth → URL Configuration → Redirect URLs');
+      }
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -216,6 +227,12 @@ export class AuthService {
 
   async signOut(): Promise<void> {
     await supabase.auth.signOut();
+    // Invalidate the in-memory auth cache in database.ts so next user
+    // on the same device gets a clean slate (fixes cross-user data leak).
+    try {
+      const { clearAuthUserCache } = await import('./database');
+      clearAuthUserCache();
+    } catch { /* non-critical */ }
     // FIX: clear ALL app-related AsyncStorage keys — was only removing USER_DATA,
     // meaning next user on same device inherited theme, notifications, onboarding state, etc.
     await AsyncStorage.multiRemove([
@@ -290,14 +307,21 @@ export class AuthService {
         .eq('id', user.id);
       if (profileError) throw profileError;
 
-      // 2. FIX: Call Edge Function to delete the actual Supabase Auth user record.
-      // Previous code only deleted the profiles row — auth user remained alive,
-      // violating Apple/Google data deletion requirements (guaranteed rejection).
+      // 2. Call Edge Function to delete the actual Supabase Auth user record.
+      // This is REQUIRED by Apple App Store & Google Play data deletion guidelines.
+      // The Edge Function must exist — if it fails, we abort and surface the error
+      // rather than leaving a zombie auth account (guaranteed store rejection).
       const { error: fnError } = await supabase.functions.invoke('delete-user', {
         body: { userId: user.id },
       });
-      // Non-fatal if Edge Function unavailable — log but continue cleanup
-      if (fnError) console.warn('[deleteAccount] Edge function error:', fnError.message);
+      if (fnError) {
+        // Re-throw so the caller shows the user a meaningful error message.
+        // Do NOT silently continue — the auth record still exists if we do.
+        throw new Error(
+          'Account deletion could not be completed. Please contact support. (' +
+          fnError.message + ')'
+        );
+      }
 
       // 3. Sign out and clear ALL storage
       await supabase.auth.signOut();

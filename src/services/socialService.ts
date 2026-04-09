@@ -28,6 +28,22 @@
 import { supabase } from './supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// ── SECURITY NOTE ─────────────────────────────────────────────────────────────
+// This service assumes Row Level Security (RLS) is enabled on ALL tables below.
+// Required RLS policies (verify in Supabase Dashboard → Authentication → Policies):
+//
+//   profiles:        SELECT — authenticated users can read public profiles
+//                    UPDATE — users can only update their own row (auth.uid() = id)
+//   follows:         SELECT — authenticated; INSERT/DELETE — own rows only
+//   activity_feed:   SELECT — only from users you follow (or your own)
+//   feed_likes:      SELECT — authenticated; INSERT/DELETE — own rows only
+//   feed_comments:   SELECT — authenticated; INSERT/DELETE — own rows only
+//   direct_messages: SELECT — sender_id = auth.uid() OR recipient_id = auth.uid()
+//
+// Without RLS, all users' private data is readable by any authenticated user.
+// ──────────────────────────────────────────────────────────────────────────────
+
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type FeedItemType =

@@ -157,7 +157,15 @@ const result = await openAuthSessionAsync(authUrl, redirectUri);
         body: JSON.stringify({ code, client_id: STRAVA_CLIENT_ID }),
       },
     );
-        if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
+        if (!tokenRes.ok) {
+          if (tokenRes.status === 404) {
+            throw new Error(
+              'Strava import requires the "strava-exchange" Supabase Edge Function to be deployed. ' +
+              'See supabase/functions/strava-exchange/ in the project.'
+            );
+          }
+          throw new Error(`Strava token exchange failed (HTTP ${tokenRes.status}). Check your Supabase Edge Function logs.`);
+        }
         const tokenJson = await tokenRes.json() as { access_token: string };
         const summary = await importFromStrava(tokenJson.access_token);
         show({

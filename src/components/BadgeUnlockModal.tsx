@@ -11,12 +11,31 @@ import {
 import { BadgeDefinition } from '../constants/badges';
 import { useTheme } from '../context/ThemeContext';
 
+// ── Modal-scoped Error Boundary ─────────────────────────────────────────────
+// Prevents modal render errors from crashing the parent screen.
+class ModalErrorBoundary extends Component<
+  { children: React.ReactNode; onError?: () => void },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(e: Error) {
+    console.warn('[BadgeUnlockModal] render error:', e.message);
+    this.props.onError?.();
+  }
+  render() {
+    if (this.state.hasError) return null; // silently dismiss on error
+    return this.props.children;
+  }
+}
+
+
 interface Props {
   badge: BadgeDefinition | null;
   onDismiss: () => void;
 }
 
-export default function BadgeUnlockModal({ badge, onDismiss }: Props) {
+function BadgeUnlockModalInner({ badge, onDismiss }: Props) {
   const { colors } = useTheme();
   const scaleAnim   = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
@@ -173,3 +192,11 @@ const styles = StyleSheet.create({
   },
   dismissText: { color: '#FFFFFF', fontWeight: '900', fontSize: 15 },
 });
+
+export default function BadgeUnlockModal(props: Parameters<typeof BadgeUnlockModalInner>[0]) {
+  return (
+    <ModalErrorBoundary>
+      <BadgeUnlockModalInner {...props} />
+    </ModalErrorBoundary>
+  );
+}
