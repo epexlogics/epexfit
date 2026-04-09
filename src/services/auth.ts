@@ -233,7 +233,7 @@ export class AuthService {
     ]);
   }
 
-  async updateProfile(profile: Partial<User & { fitnessLevel?: string; age?: number }>): Promise<{
+  async updateProfile(profile: Partial<User & { fitnessLevel?: string; age?: number; onboarding_complete?: boolean }>): Promise<{
     success: boolean;
     error: any;
   }> {
@@ -243,13 +243,17 @@ export class AuthService {
       } = await supabase.auth.getUser();
       if (!user) throw new Error('No user found');
 
-      const updates: Record<string, unknown> = {};
+      const updates: Record<string, unknown> = { id: user.id };
       if (profile.fullName !== undefined) updates.full_name = profile.fullName;
       if (profile.height !== undefined) updates.height = profile.height;
       if (profile.weight !== undefined) updates.weight = profile.weight;
       if (profile.gender !== undefined) updates.gender = profile.gender;
+      if (profile.onboarding_complete !== undefined) updates.onboarding_complete = profile.onboarding_complete;
 
-      const { error } = await supabase.from('profiles').update(updates).eq('id', user.id);
+      // Use upsert so the call works even if the profile row doesn't exist yet
+      const { error } = await supabase
+        .from('profiles')
+        .upsert(updates, { onConflict: 'id' });
       if (error) throw error;
 
       return { success: true, error: null };

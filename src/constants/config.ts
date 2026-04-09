@@ -9,8 +9,11 @@
 export const SUPABASE_URL: string =
   process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 
-export const SUPABASE_ANON_KEY: string =
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+// Supabase's "anon" key is a publishable key — safe to embed in client apps.
+// It is rate-limited and subject to Row Level Security. Rename reflects its
+// true purpose and avoids confusion with server-side secret keys.
+export const SUPABASE_PUBLISHABLE_KEY: string =
+  process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
 
 export const APP_CONFIG = {
   appName: 'EpexFit',

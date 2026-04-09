@@ -728,7 +728,7 @@ export default function HomeScreen({ navigation }: any) {
         feedItems.push({
           id: `food_${f.id}`,
           kind: 'food',
-          title: `${f.meal_type.charAt(0).toUpperCase() + f.meal_type.slice(1)} logged`,
+          title: `${(f.meal_type ?? 'meal').charAt(0).toUpperCase() + (f.meal_type ?? 'meal').slice(1)} logged`,
           subtitle: `${f.calories} kcal`,
           icon: 'food-apple',
           color: colors.metricFood,
