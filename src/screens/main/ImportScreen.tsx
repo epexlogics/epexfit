@@ -1,5 +1,10 @@
 /**
  * ImportScreen — Import activities from Strava, Garmin (TCX), Apple Health
+ *
+ * FIX: Removed react-native-health-connect requestPermission call.
+ * It crashes with UninitializedPropertyAccessException (Fatal) on Android
+ * because the lateinit requestPermission var is not initialized outside
+ * a proper Activity lifecycle context. This was killing the entire app.
  */
 import React, { useCallback, useState } from 'react';
 import {
@@ -15,8 +20,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
-import * as AuthSession from 'expo-auth-session';
-import { makeRedirectUri } from 'expo-auth-session';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../../context/ThemeContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -28,27 +31,12 @@ import { openAuthSessionAsync } from 'expo-web-browser';
 
 const STRAVA_CLIENT_ID = process.env.EXPO_PUBLIC_STRAVA_CLIENT_ID ?? '';
 const STRAVA_AUTH_URL = 'https://www.strava.com/oauth/mobile/authorize';
-// Token exchange happens server-side via Supabase Edge Function (strava-exchange)
-// so the client_secret is never exposed in the app bundle.
 
 function ImportCard({
-  icon,
-  title,
-  description,
-  color,
-  buttonLabel,
-  onPress,
-  loading,
-  connected,
+  icon, title, description, color, buttonLabel, onPress, loading, connected,
 }: {
-  icon: string;
-  title: string;
-  description: string;
-  color: string;
-  buttonLabel: string;
-  onPress: () => void;
-  loading?: boolean;
-  connected?: boolean;
+  icon: string; title: string; description: string; color: string;
+  buttonLabel: string; onPress: () => void; loading?: boolean; connected?: boolean;
 }) {
   const { colors } = useTheme();
   return (
@@ -61,7 +49,7 @@ function ImportCard({
           <Text style={[iC.title, { color: colors.text }]}>{title}</Text>
           {connected && (
             <View style={[iC.badge, { backgroundColor: '#22C55E22' }]}>
-              <Text style={{ color: '#22C55E', fontSize: 11, fontWeight: '700' }}>✓ Connected</Text>
+              <Text style={{ color: '#22C55E', fontSize: 11, fontWeight: '700' }}>Connected</Text>
             </View>
           )}
         </View>
@@ -84,35 +72,16 @@ function ImportCard({
 
 const iC = StyleSheet.create({
   card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    padding: 16,
-    borderRadius: borderRadius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    padding: 16, borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth, marginBottom: 12,
   },
-  iconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
+  iconWrap: { width: 52, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   title: { fontSize: 16, fontWeight: '700' },
   desc: { fontSize: 13, lineHeight: 18 },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  btn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    flexShrink: 0,
-  },
+  btn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: borderRadius.full, borderWidth: 1, flexShrink: 0 },
 });
-
-// ── Screen ─────────────────────────────────────────────────────────────────
 
 export default function ImportScreen() {
   const { colors, accent } = useTheme();
@@ -121,7 +90,6 @@ export default function ImportScreen() {
 
   const [stravaLoading, setStravaLoading] = useState(false);
   const [garminLoading, setGarminLoading] = useState(false);
-  const [healthLoading, setHealthLoading] = useState(false);
 
   // ── Strava ─────────────────────────────────────────────────────────────
   const handleStravaConnect = useCallback(async () => {
@@ -135,36 +103,24 @@ export default function ImportScreen() {
       const authUrl =
         `${STRAVA_AUTH_URL}?client_id=${STRAVA_CLIENT_ID}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-        `&response_type=code` +
-        `&scope=activity:read_all` +
-        `&approval_prompt=auto`;
+        `&response_type=code&scope=activity:read_all&approval_prompt=auto`;
 
-const result = await openAuthSessionAsync(authUrl, redirectUri);
+      const result = await openAuthSessionAsync(authUrl, redirectUri);
 
-  if (result.type === 'success' && result.url) {
-    const code = new URL(result.url).searchParams.get('code');
-    // Call Supabase Edge Function — secret stays server-side
-    const { data: { session } } = await supabase.auth.getSession();
-    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-    const tokenRes = await fetch(
-      `${supabaseUrl}/functions/v1/strava-exchange`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token ?? ''}`,
-        },
-        body: JSON.stringify({ code, client_id: STRAVA_CLIENT_ID }),
-      },
-    );
+      if (result.type === 'success' && result.url) {
+        const code = new URL(result.url).searchParams.get('code');
+        const { data: { session } } = await supabase.auth.getSession();
+        const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+        const tokenRes = await fetch(`${supabaseUrl}/functions/v1/strava-exchange`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token ?? ''}`,
+          },
+          body: JSON.stringify({ code, client_id: STRAVA_CLIENT_ID }),
+        });
         if (!tokenRes.ok) {
-          if (tokenRes.status === 404) {
-            throw new Error(
-              'Strava import requires the "strava-exchange" Supabase Edge Function to be deployed. ' +
-              'See supabase/functions/strava-exchange/ in the project.'
-            );
-          }
-          throw new Error(`Strava token exchange failed (HTTP ${tokenRes.status}). Check your Supabase Edge Function logs.`);
+          throw new Error(`Strava token exchange failed (HTTP ${tokenRes.status}).`);
         }
         const tokenJson = await tokenRes.json() as { access_token: string };
         const summary = await importFromStrava(tokenJson.access_token);
@@ -172,9 +128,7 @@ const result = await openAuthSessionAsync(authUrl, redirectUri);
           message: `Imported ${summary.imported} activit${summary.imported !== 1 ? 'ies' : 'y'}${summary.skipped > 0 ? ` (${summary.skipped} skipped)` : ''}`,
           variant: 'success',
         });
-      } else if (result.type === 'cancel' || result.type === 'dismiss') {
-        // User cancelled — do nothing
-      } else {
+      } else if (result.type !== 'cancel' && result.type !== 'dismiss') {
         throw new Error('Strava authorisation failed');
       }
     } catch (e: any) {
@@ -192,11 +146,9 @@ const result = await openAuthSessionAsync(authUrl, redirectUri);
         type: ['application/xml', 'text/xml', '*/*'],
         multiple: true,
       });
-
       if (result.canceled || result.assets.length === 0) return;
 
       let imported = 0, errors = 0;
-
       for (const asset of result.assets) {
         try {
           const xml = await FileSystem.readAsStringAsync(asset.uri);
@@ -207,13 +159,10 @@ const result = await openAuthSessionAsync(authUrl, redirectUri);
           } else {
             errors++;
           }
-        } catch {
-          errors++;
-        }
+        } catch { errors++; }
       }
-
       show({
-        message: `Imported ${imported} activity${imported !== 1 ? 'ies' : 'y'}${errors > 0 ? ` (${errors} failed)` : ''}`,
+        message: `Imported ${imported} activit${imported !== 1 ? 'ies' : 'y'}${errors > 0 ? ` (${errors} failed)` : ''}`,
         variant: imported > 0 ? 'success' : 'error',
       });
     } catch {
@@ -224,64 +173,17 @@ const result = await openAuthSessionAsync(authUrl, redirectUri);
   }, [show]);
 
   // ── Apple Health / Google Fit ──────────────────────────────────────────
-  const handleHealthImport = useCallback(async () => {
-    setHealthLoading(true);
-    try {
-      if (Platform.OS === 'android') {
-        // Android: expo-health-connect
-        const HealthConnect = await import('react-native-health-connect').catch(() => null);
-        if (!HealthConnect) {
-          show({ message: 'Health Connect not available. Install it from the Play Store.', variant: 'error' });
-          return;
-        }
-        const isInit = await HealthConnect.initialize();
-        if (!isInit) {
-          show({ message: 'Health Connect could not be initialised on this device.', variant: 'error' });
-          return;
-        }
-        await HealthConnect.requestPermission([
-          { accessType: 'read', recordType: 'Steps' },
-          { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
-          { accessType: 'read', recordType: 'ExerciseSession' },
-        ]);
-        const now = new Date();
-        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        const records = await HealthConnect.readRecords('ExerciseSession', {
-          timeRangeFilter: {
-            operator: 'between',
-            startTime: monthAgo.toISOString(),
-            endTime: now.toISOString(),
-          },
-        });
-        const mapped = (records?.records ?? []).map((r: any, i: number) => ({
-          externalId: `health_connect_${r.metadata?.id ?? i}`,
-          source: 'google_fit' as const,
-          type: 'other',
-          distanceKm: (r.totalDistance?.inMeters ?? 0) / 1000,
-          durationSec: r.endTime && r.startTime
-            ? Math.round((new Date(r.endTime).getTime() - new Date(r.startTime).getTime()) / 1000)
-            : 0,
-          calories: r.totalActiveCalories?.inCalories ?? 0,
-          startedAt: r.startTime ?? new Date().toISOString(),
-        }));
-        const summary = await importFromHealthPlatform(mapped);
-        show({
-          message: `Imported ${summary.imported} activit${summary.imported !== 1 ? 'ies' : 'y'}${summary.skipped > 0 ? ` (${summary.skipped} skipped)` : ''}`,
-          variant: summary.imported > 0 ? 'success' : 'info',
-        });
-      } else {
-        // iOS: react-native-health (HealthKit)
-        show({
-          message: 'iOS HealthKit sync — wire react-native-health in your Expo dev build. See DEPLOYMENT_GUIDE.md.',
-          variant: 'info',
-          duration: 5000,
-        });
-      }
-    } catch (e: any) {
-      show({ message: e?.message ?? 'Health import failed', variant: 'error' });
-    } finally {
-      setHealthLoading(false);
-    }
+  // FIX: react-native-health-connect crashes with fatal UninitializedPropertyAccessException
+  // on Android — lateinit requestPermission not initialized outside Activity context.
+  // Removed the call entirely. Steps are already synced via ActivityScreen HealthSyncWidget.
+  const handleHealthImport = useCallback(() => {
+    show({
+      message: Platform.OS === 'android'
+        ? 'Steps sync is available on the Activity screen. Tap the SYNC button on the health widget.'
+        : 'iOS HealthKit sync is available on the Activity screen.',
+      variant: 'info',
+      duration: 4000,
+    });
   }, [show]);
 
   return (
@@ -322,11 +224,10 @@ const result = await openAuthSessionAsync(authUrl, redirectUri);
         <ImportCard
           icon="heart-pulse"
           title="Apple Health / Google Fit"
-          description="Sync workouts, steps, and heart rate from your phone's health platform."
+          description="Steps and workouts sync automatically via the Activity screen health widget."
           color="#FF3B30"
-          buttonLabel="Sync"
+          buttonLabel="How to Sync"
           onPress={handleHealthImport}
-          loading={healthLoading}
         />
 
         <View style={[iS.note, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -342,23 +243,16 @@ const result = await openAuthSessionAsync(authUrl, redirectUri);
 
 const iS = StyleSheet.create({
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: spacing.md, paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   title: { fontSize: 18, fontWeight: '700' },
   content: { padding: spacing.md, paddingBottom: 60 },
   intro: { fontSize: 14, lineHeight: 22, marginBottom: 20 },
   note: {
-    flexDirection: 'row',
-    gap: 10,
-    padding: 14,
-    borderRadius: borderRadius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginTop: 8,
+    flexDirection: 'row', gap: 10, padding: 14,
+    borderRadius: borderRadius.md, borderWidth: StyleSheet.hairlineWidth, marginTop: 8,
   },
   noteText: { flex: 1, fontSize: 13, lineHeight: 18 },
 });
