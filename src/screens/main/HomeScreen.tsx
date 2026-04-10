@@ -773,18 +773,22 @@ export default function HomeScreen({ navigation }: any) {
       }
 
       // ── Smart notifications in background ────────────────────────────────
-      sendSmartNotifications({
-        stepsToday: activityStore.steps,
-        stepGoal,
-        streak: currentStreak,
-        distanceToday: weeklyDistance,
-        distanceGoal: distGoal,
-        waterToday: waterStore.glasses,
-        waterGoal: DEFAULT_WATER_GOAL,
-      }).catch(() => {});
+      // FIX: try/catch around both — if either throws synchronously before
+      // returning a Promise, .catch() won't fire and it crashes all of loadData
+      try {
+        sendSmartNotifications({
+          stepsToday: activityStore.steps,
+          stepGoal,
+          streak: currentStreak,
+          distanceToday: weeklyDistance,
+          distanceGoal: distGoal,
+          waterToday: waterStore.glasses,
+          waterGoal: DEFAULT_WATER_GOAL,
+        }).catch(() => {});
+      } catch {}
 
       // ── Goal progress sync in background ─────────────────────────────────
-      databaseService.syncGoalProgress(user.id).catch(() => {});
+      try { databaseService.syncGoalProgress(user.id).catch(() => {}); } catch {}
 
     } catch (err: any) {
       // Production APK debugging: full error details
@@ -946,10 +950,10 @@ export default function HomeScreen({ navigation }: any) {
   // ─────────────────────────────────────────────────────────────────────────
   if (isLoading) return <HomeScreenSkeleton />;
 
-  // Error state with retry
+  // Error state with retry — edges includes bottom so tab bar doesn't overlap
   if (loadError && !data) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', padding: 32 }} edges={['top', 'bottom']}>
         <Text style={{ fontSize: 40, marginBottom: 16 }}>⚠️</Text>
         <Text style={{ fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 8, textAlign: 'center' }}>
           Couldn't load your data
