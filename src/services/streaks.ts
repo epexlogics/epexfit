@@ -202,11 +202,14 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
       // Direct insert — circular dependency fix (socialService imports streaks)
       supabase.auth.getUser().then(({ data: { user } }) => {
         if (user) {
-          supabase.from('activity_feed').insert({
-            actor_id: user.id,
-            type: 'streak',
-            payload: { days: streak },
-          }).then(() => {}).catch(() => {});
+          void supabase
+            .from('activity_feed')
+            .insert({
+              actor_id: user.id,
+              type: 'streak',
+              payload: { days: streak },
+            })
+            .then(() => {}, () => {});
         }
       }).catch(() => {});
     }

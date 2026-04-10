@@ -12,7 +12,7 @@ import { Text, View } from 'react-native';
 import * as Sentry from '@sentry/react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, LinkingOptions, ParamListBase } from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
@@ -190,7 +190,7 @@ export default function App() {
         },
       },
     },
-  };
+  } as LinkingOptions<ParamListBase>;
 
   return (
     <ErrorBoundary>

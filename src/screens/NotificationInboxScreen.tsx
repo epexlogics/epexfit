@@ -32,9 +32,9 @@ import { borderRadius, spacing } from '../constants/theme';
 import { TAB_BAR_HEIGHT } from '../constants/layout';
 
 // PRODUCTION FIX: relativeTime plugin ki jagah pure JS — Hermes safe
-function timeAgo(date: string | Date): string {
+function timeAgo(date: string | Date | number): string {
   const now = Date.now();
-  const then = new Date(date).getTime();
+  const then = typeof date === 'number' ? date : new Date(date).getTime();
   const diff = Math.floor((now - then) / 1000);
   if (diff < 60) return 'just now';
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;

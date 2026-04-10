@@ -13,6 +13,14 @@
     ],
     "plugins": [
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./src/assets/splash.png",
@@ -71,7 +79,6 @@
     },
     "android": {
       "package": "com.epexlogics.epexfit",
-      "minSdkVersion": 26,
       "adaptiveIcon": {
         "foregroundImage": "./src/assets/adaptive-icon.png",
         "backgroundColor": "#000000"
