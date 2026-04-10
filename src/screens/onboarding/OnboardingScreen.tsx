@@ -93,21 +93,22 @@ export default function OnboardingScreen({ navigation }: any) {
         return;
       }
 
-      // Step 1: Save profile (non-fatal — AsyncStorage fallback handles navigation)
-      try {
-        await updateProfile({ height: h, weight: w, onboarding_complete: true } as any);
-      } catch (_) {
-        // ignored — AsyncStorage flag below is the source of truth for navigation
-      }
-
       // Step 2: Save all local AsyncStorage keys
       await AsyncStorage.multiSet([
         ['user_fitness_goal', selectedGoal ?? ''],
         ['user_fitness_level', selectedLevel ?? ''],
         ['user_training_days', String(trainingDays)],
-        ['@epexfit_onboarding', JSON.stringify({ goal: selectedGoal, level: selectedLevel, trainingDays, height: h, weight: w })],
-        [STORAGE_KEYS.ONBOARDING, 'complete'],  // ← MUST be set before navigation
+        // FIX: store onboarding data at a DIFFERENT key from STORAGE_KEYS.ONBOARDING
+        // Previously both used '@epexfit_onboarding' — the JSON overwrote 'complete'
+        // causing AppNavigator to never see val === 'complete'
+        ['@epexfit_onboarding_data', JSON.stringify({ goal: selectedGoal, level: selectedLevel, trainingDays, height: h, weight: w })],
+        [STORAGE_KEYS.ONBOARDING, 'complete'],  // ← MUST be 'complete' for AppNavigator
       ]);
+
+      // Also update Supabase profile onboarding_complete flag
+      try {
+        await updateProfile({ height: h, weight: w, onboarding_complete: true } as any);
+      } catch (_) {}
 
       // Step 3: Default goals (non-fatal)
       try {
@@ -125,7 +126,7 @@ export default function OnboardingScreen({ navigation }: any) {
         console.warn('[Onboarding] Default goals creation failed (non-fatal):', goalError);
       }
 
-      // Step 4: Navigate — AsyncStorage.ONBOARDING is already 'complete' above
+      // Step 4: Navigate
       navigation.replace('Main');
 
     } catch (error) {

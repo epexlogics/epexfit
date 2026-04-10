@@ -680,12 +680,17 @@ export default function HomeScreen({ navigation }: any) {
       // ── APS — Planned workouts from onboarding ────────────────────────────
       let plannedWorkouts = 5;
       try {
-        const onboardingRaw = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING);
-        if (onboardingRaw) {
-          const ob = JSON.parse(onboardingRaw);
-          if (ob?.trainingDays && typeof ob.trainingDays === 'number') {
-            plannedWorkouts = ob.trainingDays;
+        const onboardingRaw = await AsyncStorage.getItem('@epexfit_onboarding_data');
+        if (!onboardingRaw) {
+          // fallback: try old key for users who onboarded before this fix
+          const oldRaw = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING);
+          if (oldRaw && oldRaw !== 'complete') {
+            const ob = JSON.parse(oldRaw);
+            if (ob?.trainingDays && typeof ob.trainingDays === 'number') plannedWorkouts = ob.trainingDays;
           }
+        } else {
+          const ob = JSON.parse(onboardingRaw);
+          if (ob?.trainingDays && typeof ob.trainingDays === 'number') plannedWorkouts = ob.trainingDays;
         }
       } catch {}
 

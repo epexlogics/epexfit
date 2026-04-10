@@ -305,19 +305,20 @@ export default function SocialFeedScreen() {
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={['top']}>
+      {/* Header — two rows: title row + actions row */}
       <View style={s.header}>
-        <View style={{ flex: 1, marginRight: 8 }}>
-  <Text style={[s.title, { color: colors.text }]}>Community</Text>
-  <Text style={[s.sub, { color: colors.textSecondary }]}>
-    Activity from people you follow
-  </Text>
-</View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <View style={s.headerTop}>
+          <Text style={[s.title, { color: colors.text }]}>Community</Text>
           {fromCache && (
             <View style={[s.cacheBadge, { backgroundColor: '#FF950018', borderColor: '#FF950040' }]}>
               <Text style={{ fontSize: 10, color: '#FF9500', fontWeight: '700' }}>📶 Cached</Text>
             </View>
           )}
+        </View>
+        <Text style={[s.sub, { color: colors.textSecondary }]}>
+          Activity from people you follow
+        </Text>
+        <View style={s.headerActions}>
           <TouchableOpacity
             style={[s.findBtn, { backgroundColor: accent + '15', borderColor: accent + '40' }]}
             onPress={() => navigation.navigate('CreatePost')}
@@ -442,10 +443,20 @@ const fc = StyleSheet.create({
 const s = StyleSheet.create({
   container: { flex: 1 },
   header: {
-  flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-  paddingHorizontal: spacing.md, paddingBottom: 12,
-  paddingRight: spacing.md, // already tha — asli fix neeche hai
-},
+    paddingHorizontal: spacing.md,
+    paddingBottom: 12,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
   title: { fontSize: 28, fontWeight: '900', letterSpacing: -1 },
   sub: { fontSize: 13, marginTop: 2 },
   cacheBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1 },

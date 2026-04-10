@@ -67,10 +67,8 @@ export default function CreatePostScreen() {
       if (imageUri && user) {
         setUploadingImage(true);
         try {
-          // FIX: use uploadActivityPhoto (activity-photos bucket) not uploadAvatar
-          const { url, error: uploadError } = await storageService.uploadActivityPhoto(
+          const { url, error: uploadError } = await storageService.uploadPostImage(
             user.id,
-            `post_${Date.now()}`,
             imageUri,
           );
           if (!uploadError && url) uploadedImageUrl = url;

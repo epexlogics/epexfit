@@ -186,7 +186,7 @@ export default function CommentsScreen() {
         {/* Header */}
         <View style={[s.header, { borderBottomColor: dividerColor }]}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-            <Text style={[s.backText, { color: accent }]}>← Back</Text>
+            <Text style={[s.backText, { color: accent }]}>Back</Text>
           </TouchableOpacity>
           <Text style={[s.title, { color: colors.text }]}>Comments</Text>
           {comments.length > 0 && (
@@ -251,7 +251,7 @@ export default function CommentsScreen() {
             {posting ? (
               <ActivityIndicator size="small" color="#000" />
             ) : (
-              <Text style={[s.sendIcon, { color: text.trim() ? '#000' : colors.textSecondary }]}>↑</Text>
+              <Text style={[s.sendIcon, { color: text.trim() ? '#000' : colors.textSecondary }]}>Send</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -303,8 +303,9 @@ const s = StyleSheet.create({
     fontSize: 14, maxHeight: 100, fontWeight: '500',
   },
   sendBtn: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 56, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 10,
   },
-  sendIcon: { fontSize: 18, fontWeight: '900' },
+  sendIcon: { fontSize: 13, fontWeight: '900' },
 });

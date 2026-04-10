@@ -156,6 +156,33 @@ export class StorageService {
       return { url: null, error };
     }
   }
-}
+  // Upload image for social posts — uses avatars bucket with decode() for correct binary upload
+  async uploadPostImage(userId: string, photoUri: string): Promise<{ url: string | null; error: any }> {
+    try {
+      const ext = (photoUri.split('.').pop() ?? 'jpg').toLowerCase().replace(/\?.*$/, '');
+      const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? ext : 'jpg';
+      const fileName = `posts/${userId}/post_${Date.now()}.${safeExt}`;
 
-export const storageService = new StorageService();
+      let fileData: string | Blob;
+      if (Platform.OS === 'web') {
+        const response = await fetch(photoUri);
+        fileData = await response.blob();
+        const { error } = await supabase.storage
+          .from('avatars')
+          .upload(fileName, fileData, { contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`, upsert: false });
+        if (error) throw error;
+      } else {
+        const base64 = await FileSystem.readAsStringAsync(photoUri, { encoding: FileSystem.EncodingType.Base64 });
+        const { error } = await supabase.storage
+          .from('avatars')
+          .upload(fileName, decode(base64), { contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`, upsert: false });
+        if (error) throw error;
+      }
+
+      const { data: publicUrl } = supabase.storage.from('avatars').getPublicUrl(fileName);
+      return { url: publicUrl.publicUrl, error: null };
+    } catch (error) {
+      return { url: null, error };
+    }
+  }
+}
