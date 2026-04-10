@@ -4,6 +4,7 @@ import * as AuthSession from 'expo-auth-session';
 import { STORAGE_KEYS } from '../constants/config';
 import { User } from '../types';
 import { supabase } from './supabase';
+import { clearAuthUserCache } from './database';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -230,7 +231,6 @@ export class AuthService {
     // Invalidate the in-memory auth cache in database.ts so next user
     // on the same device gets a clean slate (fixes cross-user data leak).
     try {
-      const { clearAuthUserCache } = await import('./database');
       clearAuthUserCache();
     } catch { /* non-critical */ }
     // FIX: clear ALL app-related AsyncStorage keys — was only removing USER_DATA,

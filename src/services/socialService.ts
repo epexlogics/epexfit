@@ -14,6 +14,7 @@
 
 import { supabase } from './supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getUnlockedBadgeIds, recalculateStreak } from './streaks';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -305,11 +306,9 @@ class SocialService {
       let badgeIds: string[] = [];
       let streak = 0;
       try {
-        const { getUnlockedBadgeIds } = await import('./streaks');
         badgeIds = await getUnlockedBadgeIds(userId);
       } catch {}
       try {
-        const { recalculateStreak } = await import('./streaks');
         streak = await recalculateStreak(userId);
       } catch {}
 

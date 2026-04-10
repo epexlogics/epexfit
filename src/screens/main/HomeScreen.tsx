@@ -83,6 +83,11 @@ function timeAgo(date: string | Date): string {
   return `${Math.floor(diff / 604800)}w ago`;
 }
 
+/** Supabase / network edge cases sometimes return a non-array for `data` — never call .filter/.find on that. */
+function asArray<T>(v: unknown): T[] {
+  return Array.isArray(v) ? (v as T[]) : [];
+}
+
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -495,40 +500,44 @@ export default function HomeScreen({ navigation }: any) {
 
       const workouts: WorkoutRow[] =
         workoutsResult.status === 'fulfilled'
-          ? (workoutsResult.value.data ?? [])
+          ? asArray<WorkoutRow>(workoutsResult.value?.data)
           : [];
 
       const foodLogs: FoodLogRow[] =
         foodLogsResult.status === 'fulfilled'
-          ? (foodLogsResult.value.data ?? [])
+          ? asArray<FoodLogRow>(foodLogsResult.value?.data)
           : [];
 
       const challengeRows: ChallengeRow[] =
         challengeResult.status === 'fulfilled'
-          ? (challengeResult.value.data ?? [])
+          ? asArray<ChallengeRow>(challengeResult.value?.data)
           : [];
 
       const userChallengeRows: UserChallengeRow[] =
         userChallengeResult.status === 'fulfilled'
-          ? (userChallengeResult.value.data ?? [])
+          ? asArray<UserChallengeRow>(userChallengeResult.value?.data)
           : [];
 
       const achievements: AchievementRow[] =
         achievementsResult.status === 'fulfilled'
-          ? (achievementsResult.value.data ?? [])
+          ? asArray<AchievementRow>(achievementsResult.value?.data)
           : [];
 
       const dailyLog: DailyLog | null =
         dailyLogResult.status === 'fulfilled' ? dailyLogResult.value.data : null;
 
       const goals: Goal[] =
-        goalsResult.status === 'fulfilled' ? (goalsResult.value.data ?? []) : [];
+        goalsResult.status === 'fulfilled'
+          ? asArray<Goal>(goalsResult.value?.data)
+          : [];
 
       const currentStreak: number =
         streakResult.status === 'fulfilled' ? streakResult.value : 0;
 
       const unlockedBadgeIds: string[] =
-        badgeIdsResult.status === 'fulfilled' ? badgeIdsResult.value : [];
+        badgeIdsResult.status === 'fulfilled'
+          ? asArray<string>(badgeIdsResult.value)
+          : [];
 
       // ── Avatar ────────────────────────────────────────────────────────────
       let avatarUrl: string | null = profile?.avatar_url ?? null;
@@ -614,6 +623,7 @@ export default function HomeScreen({ navigation }: any) {
       // We store best streak as a special achievement type 'best_streak_N'
       let bestStreak = currentStreak;
       const bestStreakAch = achievements.find((a) =>
+        typeof a.achievement_type === 'string' &&
         a.achievement_type.startsWith('best_streak_')
       );
       if (bestStreakAch) {
@@ -809,7 +819,7 @@ export default function HomeScreen({ navigation }: any) {
     if (!user) return;
     setIsLoading(true);
     loadData().finally(() => setIsLoading(false));
-  }, [user]);
+  }, [user, loadData]);
 
   // ── Realtime subscription: refresh on daily_log / workout changes ────────
   useEffect(() => {
@@ -840,7 +850,7 @@ export default function HomeScreen({ navigation }: any) {
       realtimeSub.current?.unsubscribe();
       if (realtimeDebounce.current) clearTimeout(realtimeDebounce.current);
     };
-  }, [user]);
+  }, [user, loadData]);
 
   // ── Pull to refresh ───────────────────────────────────────────────────────
   const onRefresh = useCallback(async () => {

@@ -1,7 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { BADGE_DEFINITIONS, evaluateBadges } from '../constants/badges';
-import { socialService } from './socialService';
 
 const STREAK_CACHE_KEY = '@epexfit_streak_cache';
 
@@ -199,10 +198,17 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
     }
 
     const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100];
-    // FIX: only publish streak event if this is a newly unlocked milestone
-    // (check if a streak badge for this milestone was just inserted)
     if (STREAK_MILESTONES.includes(streak) && newBadgeIds.some(id => id.includes('streak'))) {
-      socialService.publishFeedEvent('streak', { days: streak });
+      // Direct insert — circular dependency fix (socialService imports streaks)
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) {
+          supabase.from('activity_feed').insert({
+            actor_id: user.id,
+            type: 'streak',
+            payload: { days: streak },
+          }).then(() => {}).catch(() => {});
+        }
+      }).catch(() => {});
     }
 
     return newBadgeIds
