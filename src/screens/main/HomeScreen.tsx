@@ -729,18 +729,18 @@ export default function HomeScreen({ navigation }: any) {
       }
 
       // ── Sync badges in background ─────────────────────────────────────────
-      try {
-        syncBadges(user.id)
-          .then((newBadges) => {
-            if (newBadges.length > 0) {
-              setCelebBadge(newBadges[0]);
-              if (typeof notifyBadgeUnlocked === 'function') {
-                notifyBadgeUnlocked(newBadges[0].label, newBadges[0].icon).catch(() => {});
-              }
-            }
-          })
-          .catch(() => {});
-      } catch {}
+      syncBadges(user.id)
+        .then((newBadges) => {
+          if (newBadges.length > 0) {
+            setCelebBadge(newBadges[0]);
+            notifyBadgeUnlocked(newBadges[0].label, newBadges[0].icon).catch(() => {});
+          }
+        })
+        .catch(() => {});
+
+      // ── Assemble final data object ────────────────────────────────────────
+      setData({
+        avatarUrl,
         stepsToday,
         caloriesToday,
         distanceToday,
