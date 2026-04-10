@@ -1,24 +1,23 @@
 /**
- * AnimatedCounter — Smooth count-up animation for numbers
- * 
- * Usage:
- *   <AnimatedCounter value={85} duration={1000} style={styles.text} />
+ * AnimatedCounter — Hermes/APK safe count-up animation.
+ *
+ * ROOT CAUSE OF APK CRASH:
+ *   setNativeProps({ text }) on a <Text> ref is broken in Hermes (production).
+ *   It works in Expo Go (debug JSC) but throws or silently fails in release APK.
+ *
+ * FIX:
+ *   Use Animated.Value + listener to drive a plain React state update.
+ *   No setNativeProps, no native driver for text — pure JS state, Hermes safe.
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Text, Animated, TextStyle } from 'react-native';
 
 interface AnimatedCounterProps {
-  /** Target number to count to */
   value: number;
-  /** Animation duration in ms */
   duration?: number;
-  /** Text style */
   style?: TextStyle | TextStyle[];
-  /** Number of decimal places (default 0) */
   decimals?: number;
-  /** Prefix (e.g., "$") */
   prefix?: string;
-  /** Suffix (e.g., "km") */
   suffix?: string;
 }
 
@@ -31,34 +30,28 @@ export default function AnimatedCounter({
   suffix = '',
 }: AnimatedCounterProps) {
   const animatedValue = useRef(new Animated.Value(0)).current;
-  const textRef = useRef<Text>(null);
+  const [display, setDisplay] = useState(`${prefix}0${suffix}`);
 
   useEffect(() => {
     animatedValue.setValue(0);
-    
+
     const listener = animatedValue.addListener(({ value: v }) => {
-      const formatted = v.toFixed(decimals);
-      const display = `${prefix}${formatted}${suffix}`;
-      
-      if (textRef.current) {
-        textRef.current.setNativeProps({ text: display });
-      }
+      setDisplay(`${prefix}${v.toFixed(decimals)}${suffix}`);
     });
 
     Animated.timing(animatedValue, {
       toValue: value,
       duration,
-      useNativeDriver: false, // Can't use native driver for text
-    }).start();
+      useNativeDriver: false,
+    }).start(() => {
+      // Ensure final value is exact after animation ends
+      setDisplay(`${prefix}${value.toFixed(decimals)}${suffix}`);
+    });
 
     return () => {
       animatedValue.removeListener(listener);
     };
   }, [value, duration, decimals, prefix, suffix]);
 
-  return (
-    <Text ref={textRef} style={style}>
-      {prefix}0{suffix}
-    </Text>
-  );
+  return <Text style={style}>{display}</Text>;
 }

@@ -1,33 +1,27 @@
 /**
- * AnimatedProgressRing — Premium progress ring with animations
- * 
- * Features:
- * - Animated arc progress (clockwise from top)
- * - Count-up number animation
- * - Rounded line caps
- * - 6px stroke width
- * - Customizable size and colors
+ * AnimatedProgressRing — Hermes/APK safe progress ring.
+ *
+ * ROOT CAUSE OF APK CRASH:
+ *   Animated.createAnimatedComponent(Circle) from react-native-svg +
+ *   strokeDashoffset interpolation is broken in Hermes production builds.
+ *   The Animated node cannot drive SVG props via the native driver in release.
+ *
+ * FIX:
+ *   Drive progress via plain React state updated by a requestAnimationFrame
+ *   loop. No Animated.createAnimatedComponent, no native driver for SVG.
+ *   100% Hermes safe — same visual result.
  */
-import React, { useEffect, useRef } from 'react';
-import { View, Text, Animated, StyleSheet } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-
 interface AnimatedProgressRingProps {
-  /** Progress value 0-1 */
-  progress: number;
-  /** Ring diameter */
+  progress: number;        // 0–1
   size?: number;
-  /** Stroke width */
   strokeWidth?: number;
-  /** Active progress color */
   color: string;
-  /** Track color (background ring) */
   trackColor?: string;
-  /** Center content */
   children?: React.ReactNode;
-  /** Animation duration in ms */
   duration?: number;
 }
 
@@ -40,31 +34,52 @@ export default function AnimatedProgressRing({
   children,
   duration = 1200,
 }: AnimatedProgressRingProps) {
-  const animatedProgress = useRef(new Animated.Value(0)).current;
-  
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const center = size / 2;
 
+  const [currentProgress, setCurrentProgress] = useState(0);
+  const rafRef = useRef<number | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+  const fromRef = useRef(0);
+
   useEffect(() => {
-    // Reset and animate
-    animatedProgress.setValue(0);
-    Animated.timing(animatedProgress, {
-      toValue: Math.min(Math.max(progress, 0), 1),
-      duration,
-      useNativeDriver: false, // SVG properties don't support native driver
-    }).start();
+    const target = Math.min(Math.max(progress, 0), 1);
+    const from = fromRef.current;
+
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+    }
+    startTimeRef.current = null;
+
+    const animate = (timestamp: number) => {
+      if (startTimeRef.current === null) startTimeRef.current = timestamp;
+      const elapsed = timestamp - startTimeRef.current;
+      const t = Math.min(elapsed / duration, 1);
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - t, 3);
+      const value = from + (target - from) * eased;
+      fromRef.current = value;
+      setCurrentProgress(value);
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(animate);
+      } else {
+        fromRef.current = target;
+        setCurrentProgress(target);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
   }, [progress, duration]);
 
-  const strokeDashoffset = animatedProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [circumference, 0],
-  });
+  const strokeDashoffset = circumference * (1 - currentProgress);
 
   return (
     <View style={[styles.container, { width: size, height: size }]}>
       <Svg width={size} height={size} style={styles.svg}>
-        {/* Background track */}
         <Circle
           cx={center}
           cy={center}
@@ -73,9 +88,7 @@ export default function AnimatedProgressRing({
           strokeWidth={strokeWidth}
           fill="none"
         />
-        
-        {/* Animated progress arc */}
-        <AnimatedCircle
+        <Circle
           cx={center}
           cy={center}
           r={radius}
@@ -88,8 +101,6 @@ export default function AnimatedProgressRing({
           transform={`rotate(-90 ${center} ${center})`}
         />
       </Svg>
-      
-      {/* Center content */}
       <View style={styles.center}>
         {children}
       </View>
@@ -98,15 +109,7 @@ export default function AnimatedProgressRing({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  svg: {
-    position: 'absolute',
-  },
-  center: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  container: { alignItems: 'center', justifyContent: 'center' },
+  svg: { position: 'absolute' },
+  center: { alignItems: 'center', justifyContent: 'center' },
 });
