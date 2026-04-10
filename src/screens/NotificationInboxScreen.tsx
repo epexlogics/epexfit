@@ -31,6 +31,19 @@ import {
 import { borderRadius, spacing } from '../constants/theme';
 import { TAB_BAR_HEIGHT } from '../constants/layout';
 
+// PRODUCTION FIX: relativeTime plugin ki jagah pure JS — Hermes safe
+function timeAgo(date: string | Date): string {
+  const now = Date.now();
+  const then = new Date(date).getTime();
+  const diff = Math.floor((now - then) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return `${Math.floor(diff / 604800)}w ago`;
+}
+
+
 // ── Metadata ───────────────────────────────────────────────────────────────
 
 const TYPE_META: Record<NotifType, { icon: string; color: string; label: string }> = {
@@ -126,7 +139,7 @@ function NotifCard({
           {item.body}
         </Text>
         <Text style={[nC.time, { color: colors.textDisabled }]}>
-          {dayjs(item.receivedAt).fromNow()}
+          {timeAgo(item.receivedAt)}
         </Text>
       </View>
     </TouchableOpacity>

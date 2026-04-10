@@ -68,6 +68,19 @@ import { HomeScreenSkeleton } from '../../components/SkeletonLoader';
 import AnimatedProgressRing from '../../components/AnimatedProgressRing';
 import AnimatedCounter from '../../components/AnimatedCounter';
 
+// PRODUCTION FIX: relativeTime plugin ki jagah pure JS — Hermes safe
+function timeAgo(date: string | Date): string {
+  const now = Date.now();
+  const then = new Date(date).getTime();
+  const diff = Math.floor((now - then) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return `${Math.floor(diff / 604800)}w ago`;
+}
+
+
 // ─── Constants ─────────────────────────────────────────────────────────────
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DEFAULT_STEP_GOAL = 10000;
@@ -745,7 +758,7 @@ export default function HomeScreen({ navigation }: any) {
             id: `ach_${ach.id}`,
             kind: 'achievement',
             title: meta.label,
-            subtitle: `Earned ${dayjs(ach.earned_at).fromNow()}`,
+            subtitle: `Earned ${timeAgo(ach.earned_at)}`,
             icon: 'star',
             color: meta.color,
             createdAt: new Date(ach.earned_at),

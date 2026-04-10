@@ -154,24 +154,39 @@ const shadows = StyleSheet.create({
   },
 });
 
+// PRODUCTION FIX: isoWeek plugin ka use nahi karte — plain JS se ISO week calculate karo.
+// Hermes (production APK) mein dayjs plugin registration guarantee nahi hoti,
+// isliye startOf('isoWeek') crash karta tha. Pure JS 100% safe hai.
+function getIsoWeekString(): string {
+  const now = new Date();
+  const day = now.getDay() === 0 ? 7 : now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (day - 1));
+  monday.setHours(0, 0, 0, 0);
+  const yearStart = new Date(monday.getFullYear(), 0, 4);
+  const weekNum = Math.ceil(
+    ((monday.getTime() - yearStart.getTime()) / 86400000 + yearStart.getDay() + 1) / 7
+  );
+  return `${monday.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
+
 export async function shouldShowWeeklySnapshot(): Promise<boolean> {
-  const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon
-  const thisWeek = dayjs().startOf('isoWeek').format('YYYY-[W]WW');
   try {
+    const dayOfWeek = new Date().getDay();
+    const thisWeek = getIsoWeekString();
     const last = await AsyncStorage.getItem(SNAPSHOT_KEY);
-    if (last === thisWeek) return false; // already shown this week
-    // Show on Monday (normal weekly recap)
+    if (last === thisWeek) return false;
     if (dayOfWeek === 1) return true;
-    // Also show mid-week if user has never seen it (new install)
-    // — gives first-week users the motivational snapshot sooner
     if (!last) return true;
     return false;
   } catch { return false; }
 }
 
 export async function markSnapshotShown(): Promise<void> {
-  const thisWeek = dayjs().startOf('isoWeek').format('YYYY-[W]WW');
-  try { await AsyncStorage.setItem(SNAPSHOT_KEY, thisWeek); } catch {}
+  try {
+    const thisWeek = getIsoWeekString();
+    await AsyncStorage.setItem(SNAPSHOT_KEY, thisWeek);
+  } catch {}
 }
 
 const styles = StyleSheet.create({

@@ -30,6 +30,19 @@ import { borderRadius, spacing } from '../../constants/theme';
 import dayjs from '../../utils/dayjs';
 import AppIcon from '../../components/AppIcon';
 
+// PRODUCTION FIX: relativeTime plugin ki jagah pure JS — Hermes safe
+function timeAgo(date: string | Date): string {
+  const now = Date.now();
+  const then = new Date(date).getTime();
+  const diff = Math.floor((now - then) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return `${Math.floor(diff / 604800)}w ago`;
+}
+
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function getRank(badgeCount: number, streak: number, activities: number) {
@@ -378,7 +391,7 @@ export default function UserProfileScreen() {
                         return (
                           <View key={post.id} style={[s.postCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
                             <Text style={[s.postMeta, { color: colors.textSecondary }]}>
-                              {meta.emoji} {meta.label} · {dayjs(post.createdAt).fromNow()}
+                              {meta.emoji} {meta.label} · {timeAgo(post.createdAt)}
                             </Text>
                             {post.content ? (
                               <Text style={[s.postContent, { color: colors.text }]}>{post.content}</Text>

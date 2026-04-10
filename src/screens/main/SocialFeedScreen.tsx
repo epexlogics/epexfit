@@ -26,6 +26,19 @@ import { supabase } from '../../services/supabase';
 import { borderRadius, spacing } from '../../constants/theme';
 import dayjs from '../../utils/dayjs';
 
+// PRODUCTION FIX: relativeTime plugin ki jagah pure JS — Hermes safe
+function timeAgo(date: string | Date): string {
+  const now = Date.now();
+  const then = new Date(date).getTime();
+  const diff = Math.floor((now - then) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return `${Math.floor(diff / 604800)}w ago`;
+}
+
+
 const FEED_TYPE_META: Record<string, { emoji: string; label: string; color: string }> = {
   activity_completed: { emoji: '🏃', label: 'completed a workout',    color: '#4D9FFF' },
   goal_achieved:      { emoji: '🎯', label: 'crushed a goal',         color: '#00C853' },
@@ -66,7 +79,7 @@ function FeedCard({
         <View style={{ flex: 1 }}>
           <Text style={[fc.actorName, { color: colors.text }]}>{item.actorName}</Text>
           <Text style={[fc.actorSub, { color: colors.textSecondary }]}>
-            {meta.emoji} {meta.label} · {dayjs(item.createdAt).fromNow()}
+            {meta.emoji} {meta.label} · {timeAgo(item.createdAt)}
           </Text>
         </View>
         <View style={[fc.typeBadge, { backgroundColor: meta.color + '18', borderColor: meta.color + '40' }]}>
