@@ -142,7 +142,8 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
     const { data: activities } = await supabase
       .from('activities')
       .select('type, distance, steps, start_time')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('start_time', { ascending: true });
 
     const acts = activities ?? [];
     const totalDistanceKm = acts.reduce((s: number, a: any) => s + (a.distance ?? 0), 0);
@@ -198,7 +199,9 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
     }
 
     const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100];
-    if (STREAK_MILESTONES.includes(streak)) {
+    // FIX: only publish streak event if this is a newly unlocked milestone
+    // (check if a streak badge for this milestone was just inserted)
+    if (STREAK_MILESTONES.includes(streak) && newBadgeIds.some(id => id.includes('streak'))) {
       socialService.publishFeedEvent('streak', { days: streak });
     }
 

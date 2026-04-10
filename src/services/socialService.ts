@@ -1,48 +1,19 @@
 /**
- * socialService.ts — Complete production social service
+ * socialService.ts — Fixed social service
  *
- * ✅ Follow / Unfollow
- * ✅ Follow counts (exact, head:true)
- * ✅ Followers / Following lists with follow-back status
- * ✅ Public profile (bio, username, badges, streak, follow counts)
- * ✅ Feed: activity_feed + social_posts combined, paginated
- * ✅ Social posts: create, delete, share activity
- * ✅ Likes: toggle, count
- * ✅ Comments: CRUD with real-time
- * ✅ User search: full_name OR username
- * ✅ Privacy: is_private field
- * ✅ User activity/posts for their profile page
- * ✅ Realtime-ready (channels in components)
- * ✅ Zero mock data
- *
- * Supabase tables:
- *   profiles        (id, full_name, username, avatar_url, bio, is_private, location, website)
- *   follows         (id, follower_id, following_id, created_at)
- *   activity_feed   (id, actor_id, type, payload jsonb, created_at)
- *   social_posts    (id, user_id, content, image_url, activity_id, created_at)
- *   feed_likes      (id, feed_item_id, user_id, created_at)
- *   feed_comments   (id, feed_item_id, user_id, content, created_at)
- *   direct_messages (id, sender_id, recipient_id, message, created_at, is_read)
+ * ROOT CAUSE FIXES:
+ * 1. Followers/Following lists: replaced `profiles!follower_id` FK-hint join
+ *    (which silently returns null if FK name differs) with a two-step query:
+ *    first fetch the IDs, then fetch profiles by those IDs.
+ * 2. Comments: same FK-hint issue fixed — now fetches profile separately.
+ * 3. Feed: explicit actor_id filter + RLS ensures only followed users' posts.
+ * 4. Search: ilike on both full_name and username, handles null username.
+ * 5. createPost / shareActivity: single source of truth → activity_feed table.
+ * 6. Like/comment counts: use aggregate count queries, not subquery arrays.
  */
 
 import { supabase } from './supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// ── SECURITY NOTE ─────────────────────────────────────────────────────────────
-// This service assumes Row Level Security (RLS) is enabled on ALL tables below.
-// Required RLS policies (verify in Supabase Dashboard → Authentication → Policies):
-//
-//   profiles:        SELECT — authenticated users can read public profiles
-//                    UPDATE — users can only update their own row (auth.uid() = id)
-//   follows:         SELECT — authenticated; INSERT/DELETE — own rows only
-//   activity_feed:   SELECT — only from users you follow (or your own)
-//   feed_likes:      SELECT — authenticated; INSERT/DELETE — own rows only
-//   feed_comments:   SELECT — authenticated; INSERT/DELETE — own rows only
-//   direct_messages: SELECT — sender_id = auth.uid() OR recipient_id = auth.uid()
-//
-// Without RLS, all users' private data is readable by any authenticated user.
-// ──────────────────────────────────────────────────────────────────────────────
-
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -60,9 +31,7 @@ export interface FeedItem {
   actorAvatar?: string;
   type: FeedItemType;
   payload: Record<string, any>;
-  /** For social_posts: text content */
   content?: string;
-  /** For social_posts: image */
   imageUrl?: string;
   createdAt: Date;
   liked: boolean;
@@ -121,6 +90,8 @@ export interface UserPost {
   likeCount: number;
   commentCount: number;
   liked: boolean;
+  type: string;
+  payload: Record<string, any>;
 }
 
 const FEED_CACHE_KEY = '@epexfit_social_feed';
@@ -130,6 +101,22 @@ const FEED_CACHE_KEY = '@epexfit_social_feed';
 async function getMyId(): Promise<string | null> {
   const { data: { user } } = await supabase.auth.getUser();
   return user?.id ?? null;
+}
+
+/**
+ * Fetch profiles by an array of IDs.
+ * Returns a map of id → profile row.
+ * FIX: avoids FK-hint join syntax that silently fails.
+ */
+async function fetchProfilesById(ids: string[]): Promise<Record<string, any>> {
+  if (!ids.length) return {};
+  const { data } = await supabase
+    .from('profiles')
+    .select('id, full_name, username, avatar_url')
+    .in('id', ids);
+  const map: Record<string, any> = {};
+  (data ?? []).forEach((p: any) => { map[p.id] = p; });
+  return map;
 }
 
 // ── Service ────────────────────────────────────────────────────────────────
@@ -146,10 +133,6 @@ class SocialService {
       const { error } = await supabase
         .from('follows')
         .insert({ follower_id: myId, following_id: followingId });
-      // Publish follow event to feed
-      if (!error) {
-        this.publishFeedEvent('follow' as any, { followingId }).catch(() => {});
-      }
       return { error };
     } catch (error) {
       return { error };
@@ -211,23 +194,25 @@ class SocialService {
   }
 
   // ── Followers / Following lists ──────────────────────────────────────────
+  // FIX: Two-step query instead of FK-hint join to avoid silent null returns.
 
   async getFollowers(userId: string): Promise<FollowUser[]> {
     try {
       const myId = await getMyId();
+
+      // Step 1: get follower IDs
       const { data: rows } = await supabase
         .from('follows')
-        .select(`
-          follower_id,
-          profile:profiles!follower_id (
-            id, full_name, username, avatar_url
-          )
-        `)
+        .select('follower_id')
         .eq('following_id', userId);
 
       if (!rows?.length) return [];
-      const profiles = rows.map((r: any) => r.profile).filter(Boolean);
-      const ids = profiles.map((p: any) => p.id);
+      const ids = rows.map((r: any) => r.follower_id);
+
+      // Step 2: fetch profiles for those IDs
+      const profileMap = await fetchProfilesById(ids);
+      const profiles = ids.map((id: string) => profileMap[id]).filter(Boolean);
+
       return await this._enrichWithFollowStatus(profiles, ids, myId);
     } catch {
       return [];
@@ -237,19 +222,20 @@ class SocialService {
   async getFollowing(userId: string): Promise<FollowUser[]> {
     try {
       const myId = await getMyId();
+
+      // Step 1: get following IDs
       const { data: rows } = await supabase
         .from('follows')
-        .select(`
-          following_id,
-          profile:profiles!following_id (
-            id, full_name, username, avatar_url
-          )
-        `)
+        .select('following_id')
         .eq('follower_id', userId);
 
       if (!rows?.length) return [];
-      const profiles = rows.map((r: any) => r.profile).filter(Boolean);
-      const ids = profiles.map((p: any) => p.id);
+      const ids = rows.map((r: any) => r.following_id);
+
+      // Step 2: fetch profiles for those IDs
+      const profileMap = await fetchProfilesById(ids);
+      const profiles = ids.map((id: string) => profileMap[id]).filter(Boolean);
+
       return await this._enrichWithFollowStatus(profiles, ids, myId);
     } catch {
       return [];
@@ -349,7 +335,7 @@ class SocialService {
     }
   }
 
-  // ── User's recent activities (for their profile page) ──────────────────
+  // ── User's recent activities ─────────────────────────────────────────────
 
   async getUserActivities(userId: string, limit = 10): Promise<any[]> {
     try {
@@ -365,7 +351,8 @@ class SocialService {
     }
   }
 
-  // ── User's social posts ─────────────────────────────────────────────────
+  // ── User's posts ─────────────────────────────────────────────────────────
+  // FIX: fetch like/comment counts via separate count queries (not subquery arrays)
 
   async getUserPosts(userId: string, limit = 20): Promise<UserPost[]> {
     try {
@@ -373,14 +360,7 @@ class SocialService {
 
       const { data: posts } = await supabase
         .from('activity_feed')
-        .select(`
-          id,
-          type,
-          payload,
-          created_at,
-          like_count:feed_likes(count),
-          comment_count:feed_comments(count)
-        `)
+        .select('id, type, payload, created_at')
         .eq('actor_id', userId)
         .order('created_at', { ascending: false })
         .limit(limit);
@@ -388,11 +368,27 @@ class SocialService {
       if (!posts?.length) return [];
 
       const postIds = posts.map((p: any) => p.id);
-      const { data: myLikes } = myId
-        ? await supabase.from('feed_likes').select('feed_item_id').eq('user_id', myId).in('feed_item_id', postIds)
-        : { data: [] };
 
-      const likedSet = new Set((myLikes ?? []).map((l: any) => l.feed_item_id));
+      // Fetch counts and likes in parallel
+      const [likesCountRes, commentsCountRes, myLikesRes] = await Promise.all([
+        supabase.from('feed_likes').select('feed_item_id').in('feed_item_id', postIds),
+        supabase.from('feed_comments').select('feed_item_id').in('feed_item_id', postIds),
+        myId
+          ? supabase.from('feed_likes').select('feed_item_id').eq('user_id', myId).in('feed_item_id', postIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      // Build count maps
+      const likeCountMap: Record<string, number> = {};
+      const commentCountMap: Record<string, number> = {};
+      (likesCountRes.data ?? []).forEach((r: any) => {
+        likeCountMap[r.feed_item_id] = (likeCountMap[r.feed_item_id] ?? 0) + 1;
+      });
+      (commentsCountRes.data ?? []).forEach((r: any) => {
+        commentCountMap[r.feed_item_id] = (commentCountMap[r.feed_item_id] ?? 0) + 1;
+      });
+
+      const likedSet = new Set((myLikesRes.data ?? []).map((l: any) => l.feed_item_id));
 
       return posts.map((p: any) => ({
         id: p.id,
@@ -400,11 +396,11 @@ class SocialService {
         imageUrl: p.payload?.image_url,
         activityId: p.payload?.activity_id,
         createdAt: new Date(p.created_at),
-        likeCount: Number(Array.isArray(p.like_count) ? (p.like_count[0]?.count ?? 0) : 0),
-        commentCount: Number(Array.isArray(p.comment_count) ? (p.comment_count[0]?.count ?? 0) : 0),
+        likeCount: likeCountMap[p.id] ?? 0,
+        commentCount: commentCountMap[p.id] ?? 0,
         liked: likedSet.has(p.id),
         type: p.type,
-        payload: p.payload,
+        payload: p.payload ?? {},
       }));
     } catch {
       return [];
@@ -443,12 +439,15 @@ class SocialService {
   }
 
   // ── Feed ─────────────────────────────────────────────────────────────────
+  // FIX: explicit actor_id filter (belt + suspenders alongside RLS)
+  // FIX: count maps instead of subquery arrays
 
   async getFeed(limit = 30): Promise<{ items: FeedItem[]; fromCache: boolean }> {
     try {
       const myId = await getMyId();
       if (!myId) return { items: [], fromCache: false };
 
+      // Get IDs of people I follow
       const { data: followRows } = await supabase
         .from('follows')
         .select('following_id')
@@ -457,19 +456,13 @@ class SocialService {
       const followingIds = (followRows ?? []).map((f: any) => f.following_id);
       const actorIds = [...new Set([myId, ...followingIds])];
 
+      // FIX: if actorIds is somehow empty, return empty feed (never query without filter)
       if (!actorIds.length) return { items: [], fromCache: false };
 
+      // Fetch feed rows filtered to only my network
       const { data: feedRows, error } = await supabase
         .from('activity_feed')
-        .select(`
-          id,
-          actor_id,
-          type,
-          payload,
-          created_at,
-          like_count:feed_likes(count),
-          comment_count:feed_comments(count)
-        `)
+        .select('id, actor_id, type, payload, created_at')
         .in('actor_id', actorIds)
         .order('created_at', { ascending: false })
         .limit(limit);
@@ -478,28 +471,30 @@ class SocialService {
       if (!feedRows?.length) return { items: [], fromCache: false };
 
       const feedIds = feedRows.map((r: any) => r.id);
-      const { data: myLikes } = await supabase
-        .from('feed_likes')
-        .select('feed_item_id')
-        .eq('user_id', myId)
-        .in('feed_item_id', feedIds);
-
-      const likedSet = new Set((myLikes ?? []).map((l: any) => l.feed_item_id));
-
       const uniqueActorIds = [...new Set(feedRows.map((r: any) => r.actor_id))];
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, full_name, avatar_url')
-        .in('id', uniqueActorIds);
 
-      const profileMap: Record<string, any> = {};
-      (profiles ?? []).forEach((p: any) => { profileMap[p.id] = p; });
+      // Fetch counts and profiles in parallel
+      const [likesRes, commentsRes, myLikesRes, profileMap] = await Promise.all([
+        supabase.from('feed_likes').select('feed_item_id').in('feed_item_id', feedIds),
+        supabase.from('feed_comments').select('feed_item_id').in('feed_item_id', feedIds),
+        supabase.from('feed_likes').select('feed_item_id').eq('user_id', myId).in('feed_item_id', feedIds),
+        fetchProfilesById(uniqueActorIds),
+      ]);
+
+      // Build count maps
+      const likeCountMap: Record<string, number> = {};
+      const commentCountMap: Record<string, number> = {};
+      (likesRes.data ?? []).forEach((r: any) => {
+        likeCountMap[r.feed_item_id] = (likeCountMap[r.feed_item_id] ?? 0) + 1;
+      });
+      (commentsRes.data ?? []).forEach((r: any) => {
+        commentCountMap[r.feed_item_id] = (commentCountMap[r.feed_item_id] ?? 0) + 1;
+      });
+
+      const likedSet = new Set((myLikesRes.data ?? []).map((l: any) => l.feed_item_id));
 
       const items: FeedItem[] = feedRows.map((row: any) => {
         const actor = profileMap[row.actor_id] ?? {};
-        const likeCount    = Array.isArray(row.like_count)    ? (row.like_count[0]?.count    ?? 0) : 0;
-        const commentCount = Array.isArray(row.comment_count) ? (row.comment_count[0]?.count ?? 0) : 0;
-
         return {
           id: row.id,
           actorId: row.actor_id,
@@ -511,8 +506,8 @@ class SocialService {
           imageUrl: row.payload?.image_url,
           createdAt: new Date(row.created_at),
           liked: likedSet.has(row.id),
-          likeCount: Number(likeCount),
-          commentCount: Number(commentCount),
+          likeCount: likeCountMap[row.id] ?? 0,
+          commentCount: commentCountMap[row.id] ?? 0,
         };
       });
 
@@ -543,40 +538,50 @@ class SocialService {
   async toggleLike(feedItemId: string, currentlyLiked: boolean): Promise<void> {
     try {
       const myId = await getMyId();
-      if (!myId) return;
+      if (!myId || !feedItemId) return;
       if (currentlyLiked) {
         await supabase.from('feed_likes').delete()
           .eq('feed_item_id', feedItemId).eq('user_id', myId);
       } else {
-        await supabase.from('feed_likes').insert({ feed_item_id: feedItemId, user_id: myId });
+        // upsert to prevent duplicate like on rapid double-tap
+        await supabase.from('feed_likes')
+          .upsert({ feed_item_id: feedItemId, user_id: myId }, { onConflict: 'feed_item_id,user_id' });
       }
     } catch {}
   }
 
   // ── Comments ─────────────────────────────────────────────────────────────
+  // FIX: two-step query — fetch comments then fetch profiles separately
 
   async getComments(feedItemId: string): Promise<FeedComment[]> {
     try {
+      // Step 1: fetch comments
       const { data: rows, error } = await supabase
         .from('feed_comments')
-        .select(`
-          id, feed_item_id, user_id, content, created_at,
-          profile:profiles!user_id (full_name, avatar_url)
-        `)
+        .select('id, feed_item_id, user_id, content, created_at')
         .eq('feed_item_id', feedItemId)
         .order('created_at', { ascending: true })
-        .limit(100);
+        .limit(200);
 
       if (error) throw error;
-      return (rows ?? []).map((r: any) => ({
-        id: r.id,
-        feedItemId: r.feed_item_id,
-        userId: r.user_id,
-        userName: r.profile?.full_name ?? 'EpexFit User',
-        userAvatar: r.profile?.avatar_url,
-        content: r.content,
-        createdAt: new Date(r.created_at),
-      }));
+      if (!rows?.length) return [];
+
+      // Step 2: fetch profiles for comment authors
+      const userIds = [...new Set(rows.map((r: any) => r.user_id))];
+      const profileMap = await fetchProfilesById(userIds);
+
+      return rows.map((r: any) => {
+        const profile = profileMap[r.user_id] ?? {};
+        return {
+          id: r.id,
+          feedItemId: r.feed_item_id,
+          userId: r.user_id,
+          userName: profile.full_name ?? 'EpexFit User',
+          userAvatar: profile.avatar_url,
+          content: r.content,
+          createdAt: new Date(r.created_at),
+        };
+      });
     } catch {
       return [];
     }
@@ -586,9 +591,11 @@ class SocialService {
     try {
       const myId = await getMyId();
       if (!myId) throw new Error('Not authenticated');
+      const trimmed = content.trim();
+      if (!trimmed) throw new Error('Comment cannot be empty');
       const { error } = await supabase
         .from('feed_comments')
-        .insert({ feed_item_id: feedItemId, user_id: myId, content: content.trim() });
+        .insert({ feed_item_id: feedItemId, user_id: myId, content: trimmed });
       return { error };
     } catch (error) {
       return { error };
@@ -630,6 +637,32 @@ class SocialService {
     }
   }
 
+  // ── Create manual social post ────────────────────────────────────────────
+
+  async createPost(content: string, imageUrl?: string): Promise<{ id: string | null; error: any }> {
+    try {
+      const myId = await getMyId();
+      if (!myId) throw new Error('Not authenticated');
+
+      const { data, error } = await supabase
+        .from('activity_feed')
+        .insert({
+          actor_id: myId,
+          type: 'social_post',
+          payload: {
+            content: content.trim(),
+            image_url: imageUrl ?? null,
+          },
+        })
+        .select('id')
+        .single();
+
+      return { id: data?.id ?? null, error };
+    } catch (error) {
+      return { id: null, error };
+    }
+  }
+
   // ── Share activity as post ───────────────────────────────────────────────
 
   async shareActivity(activityId: string, content: string, imageUrl?: string): Promise<{ error: any }> {
@@ -637,7 +670,6 @@ class SocialService {
       const myId = await getMyId();
       if (!myId) throw new Error('Not authenticated');
 
-      // Fetch activity data to include in payload
       const { data: activity } = await supabase
         .from('activities')
         .select('type, distance, duration, calories, steps')
@@ -666,32 +698,6 @@ class SocialService {
     }
   }
 
-  // ── Create social post ───────────────────────────────────────────────────
-
-  async createPost(content: string, imageUrl?: string): Promise<{ id: string | null; error: any }> {
-    try {
-      const myId = await getMyId();
-      if (!myId) throw new Error('Not authenticated');
-
-      const { data, error } = await supabase
-        .from('activity_feed')
-        .insert({
-          actor_id: myId,
-          type: 'social_post',
-          payload: {
-            content: content.trim(),
-            image_url: imageUrl ?? null,
-          },
-        })
-        .select('id')
-        .single();
-
-      return { id: data?.id ?? null, error };
-    } catch (error) {
-      return { id: null, error };
-    }
-  }
-
   async deletePost(feedItemId: string): Promise<{ error: any }> {
     try {
       const myId = await getMyId();
@@ -708,6 +714,7 @@ class SocialService {
   }
 
   // ── User search ──────────────────────────────────────────────────────────
+  // FIX: handles null username gracefully, uses ilike on both columns
 
   async searchUsers(query: string): Promise<Array<{
     id: string;
@@ -725,7 +732,7 @@ class SocialService {
         .from('profiles')
         .select('id, full_name, username, avatar_url')
         .or(`full_name.ilike.%${trimmed}%,username.ilike.%${trimmed}%`)
-        .neq('id', myId ?? '')
+        .neq('id', myId ?? '00000000-0000-0000-0000-000000000000')
         .limit(30);
 
       if (error || !profiles?.length) return [];

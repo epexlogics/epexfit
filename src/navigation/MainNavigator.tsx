@@ -33,6 +33,7 @@ import NotificationInboxScreen from '../screens/NotificationInboxScreen';
 import EditProfileScreen from '../screens/main/EditProfileScreen';
 import NotificationSettingsScreen from '../screens/main/NotificationSettingsScreen';
 import DeleteAccountScreen from '../screens/main/DeleteAccountScreen';
+import CreatePostScreen from '../screens/main/CreatePostScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -187,6 +188,7 @@ export default function MainNavigator() {
 <Stack.Screen name="EditProfile"            component={EditProfileScreen}            options={{ headerShown: false }} />
 <Stack.Screen name="NotificationSettings"   component={NotificationSettingsScreen}   options={{ headerShown: false }} />
 <Stack.Screen name="DeleteAccount"          component={DeleteAccountScreen}          options={{ headerShown: false }} />
+      <Stack.Screen name="CreatePost"            component={CreatePostScreen}             options={{ headerShown: false, presentation: 'modal' }} />
     </Stack.Navigator>
   );
 }

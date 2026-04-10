@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
@@ -74,13 +74,13 @@ export default function HistoryScreen({ navigation }: any) {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [filter, setFilter] = useState<FilterType>('all');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!user) return;
     const { data } = await databaseService.getActivities(user.id);
     setActivities(data ?? []);
-  };
+  }, [user?.id]);
 
-  useEffect(() => { load(); }, [user?.id]);
+  useEffect(() => { load(); }, [load]);
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const filtered = useMemo(() => {

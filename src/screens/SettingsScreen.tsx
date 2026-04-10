@@ -168,8 +168,8 @@ export default function SettingsScreen() {
   }, []);
 
   // ── Dark mode ────────────────────────────────────────────────────────────
-  // ThemeContext already persists the value; we just fire the toggle.
-  const { toggleTheme, isDark } = useTheme() as ReturnType<typeof useTheme> & { toggleTheme?: () => void; isDark?: boolean };
+  // ThemeContext exposes setMode — use it to toggle dark/light
+  const { setMode, isDark } = useTheme();
 
   // ── Clear cache ──────────────────────────────────────────────────────────
   const handleClearCache = useCallback(async () => {
@@ -296,8 +296,8 @@ export default function SettingsScreen() {
             label="Dark Mode"
             right={
               <Switch
-                value={isDark ?? true}
-                onValueChange={() => toggleTheme?.()}
+                value={isDark}
+                onValueChange={(v) => setMode(v ? 'dark' : 'light')}
                 trackColor={{ false: colors.border, true: '#22D3EE55' }}
                 thumbColor={isDark ? '#22D3EE' : colors.textDisabled}
               />

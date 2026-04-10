@@ -89,6 +89,7 @@ export default function UserProfileScreen() {
     const p = await socialService.getPublicProfile(userId);
     setProfile(p);
     setLoading(false);
+    return p;
   }, [userId]);
 
   const loadUserContent = useCallback(async (p: PublicProfile | null) => {
@@ -107,8 +108,8 @@ export default function UserProfileScreen() {
   }, [userId, me?.id]);
 
   useEffect(() => {
-    load().then(() => {
-      setProfile(p => { if (p) loadUserContent(p); return p; });
+    load().then((loadedProfile) => {
+      if (loadedProfile) loadUserContent(loadedProfile);
     });
 
     // Realtime: follow count live updates
@@ -128,9 +129,21 @@ export default function UserProfileScreen() {
     return () => { channelRef.current?.unsubscribe(); };
   }, [load, userId]);
 
-  // Reload content after follow (may unlock private profile)
+  // FIX: Reload content after follow/unfollow only when isFollowing actually changes
+  // (not on initial mount — that's handled by load().then() above)
+  const prevIsFollowingRef = useRef<boolean | undefined>(undefined);
   useEffect(() => {
-    if (profile) loadUserContent(profile);
+    if (!profile) return;
+    // Skip the very first time (initial load already handled)
+    if (prevIsFollowingRef.current === undefined) {
+      prevIsFollowingRef.current = profile.isFollowing;
+      return;
+    }
+    // Only reload if isFollowing actually changed
+    if (prevIsFollowingRef.current !== profile.isFollowing) {
+      prevIsFollowingRef.current = profile.isFollowing;
+      loadUserContent(profile);
+    }
   }, [profile?.isFollowing]);
 
   const handleFollowToggle = async () => {

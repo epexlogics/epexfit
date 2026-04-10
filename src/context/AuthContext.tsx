@@ -117,10 +117,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await authService.signOut();
       clearAuthUserCache(); // Immediately invalidate DB-layer auth cache
-      // Clear all cached Supabase query data so next account gets fresh data
+      // FIX: also clear streaks auth cache
+      try {
+        const { clearStreakAuthCache } = await import('../services/streaks');
+        clearStreakAuthCache();
+      } catch {}
+      // Clear all cached data so next account gets fresh data
       try {
         const keys = await AsyncStorage.getAllKeys();
-        const cacheKeys = keys.filter(k => k.startsWith('@epexfit_cache'));
+        const cacheKeys = keys.filter(k =>
+          k.startsWith('@epexfit_cache') ||
+          k.startsWith('@epexfit_social') ||
+          k === '@epexfit_avatar_url' ||
+          k === '@epexfit_streak_cache'
+        );
         if (cacheKeys.length) await AsyncStorage.multiRemove(cacheKeys);
       } catch {}
       setUser(null);

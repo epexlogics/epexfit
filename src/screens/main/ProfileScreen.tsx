@@ -14,7 +14,7 @@
  * ✅ Badges: real from streaks service
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import {
   Alert, Dimensions, Platform, RefreshControl, ScrollView, StyleSheet,
@@ -255,6 +255,13 @@ export default function ProfileScreen() {
 
   useEffect(() => { loadData(); }, [user?.id]);
 
+  // FIX: Refresh follow counts when screen comes back into focus
+  // (user may have followed/unfollowed from FollowersListScreen or UserProfileScreen)
+  useFocusEffect(useCallback(() => {
+    if (!user) return;
+    socialService.getFollowCounts(user.id).then(counts => setFollowCounts(counts));
+  }, [user?.id]));
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadData();
@@ -453,6 +460,14 @@ export default function ProfileScreen() {
             >
               <AppIcon name="pencil" size={13} color={accent} />
               <Text style={{ fontSize: 12, color: accent, fontWeight: '700' }}>Edit Profile</Text>
+            </TouchableOpacity>
+            {/* Create post button */}
+            <TouchableOpacity
+              style={[s.editBtn, { borderColor: accent + '60', backgroundColor: accent + '10' }]}
+              onPress={() => navigation.navigate('CreatePost', {})}
+            >
+              <Text style={{ fontSize: 13 }}>✏️</Text>
+              <Text style={{ fontSize: 12, color: accent, fontWeight: '700' }}>Create Post</Text>
             </TouchableOpacity>
           </View>
         </View>

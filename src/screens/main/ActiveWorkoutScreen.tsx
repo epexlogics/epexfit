@@ -18,6 +18,7 @@ import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context'
 import * as Speech from 'expo-speech';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useActivityStore } from '../../store/activityStore';
 import { databaseService } from '../../services/database';
 import { supabase } from '../../services/supabase';
 import AppIcon from '../../components/AppIcon';
@@ -271,6 +272,7 @@ export default function ActiveWorkoutScreen({ route, navigation }: any) {
   const { workout } = route.params;
   const { colors } = useTheme();
   const { user } = useAuth();
+  const activityStore = useActivityStore();
   const accent = colors.primary;
 
   const [elapsed, setElapsed] = useState(0);
@@ -439,6 +441,9 @@ export default function ActiveWorkoutScreen({ route, navigation }: any) {
       });
 
       setFinished(true);
+
+      // FIX: sync calories to daily_logs so HomeScreen metrics update
+      activityStore.addActivityMetrics({ calories: estimatedCalories });
     } catch (err: any) {
       Alert.alert('Error', err?.message ?? 'Failed to save workout. Please try again.');
     } finally {

@@ -315,7 +315,7 @@ export class DatabaseService {
           sleep: log.sleep,
           mood: log.mood,
           notes: log.notes ?? null,
-        })
+        }, { onConflict: 'user_id,date' })
         .select()
         .single();
 
@@ -403,15 +403,14 @@ export class DatabaseService {
     }
   }
 
-  async getReminders(_userId: string): Promise<{ data: Reminder[]; error: any }> {
+  async getReminders(userId: string): Promise<{ data: Reminder[]; error: any }> {
     try {
-      const authUser = await getAuthUser();
-      if (!authUser) return { data: [], error: 'Not authenticated' };
+      if (!userId) return { data: [], error: 'Not authenticated' };
 
       const { data, error } = await supabase
         .from('reminders')
         .select('*')
-        .eq('user_id', authUser.id)
+        .eq('user_id', userId)
         .order('time', { ascending: true });
 
       if (error) throw error;
@@ -517,18 +516,17 @@ export class DatabaseService {
   }
 
   async getWorkouts(
-    _userId: string,
+    userId: string,
     startDate?: Date,
     endDate?: Date
   ): Promise<{ data: Workout[]; error: any }> {
     try {
-      const authUser = await getAuthUser();
-      if (!authUser) return { data: [], error: 'Not authenticated' };
+      if (!userId) return { data: [], error: 'Not authenticated' };
 
       let query = supabase
         .from('workouts')
         .select('*')
-        .eq('user_id', authUser.id)
+        .eq('user_id', userId)
         .order('scheduled_date', { ascending: false });
 
       if (startDate) query = query.gte('scheduled_date', startDate.toISOString());
@@ -691,10 +689,11 @@ export class DatabaseService {
 
   // ─── Goal Progress Sync ───────────────────────────────────────────────────
 
-  async syncGoalProgress(_userId: string): Promise<void> {
+  async syncGoalProgress(userId: string): Promise<void> {
     try {
-      const authUser = await getAuthUser();
-      if (!authUser) return;
+      // FIX: use passed userId directly instead of calling getAuthUser() again
+      if (!userId) return;
+      const authUser = { id: userId };
 
       const today = new Date().toISOString().split('T')[0];
 
@@ -711,7 +710,7 @@ export class DatabaseService {
           .select('steps, calories, water, protein')
           .eq('user_id', authUser.id)
           .eq('date', today)
-          .single(),
+          .maybeSingle(),
         supabase
           .from('activities')
           .select('type, distance')
@@ -766,13 +765,12 @@ export class DatabaseService {
   // ─── Historical logs (for trend charts) ───────────────────────────────────
 
   async getLogsInRange(
-    _userId: string,
+    userId: string,
     startDate: Date,
     endDate: Date
   ): Promise<{ data: DailyLog[]; error: any }> {
     try {
-      const authUser = await getAuthUser();
-      if (!authUser) return { data: [], error: null };
+      if (!userId) return { data: [], error: null };
 
       const startStr = startDate.toISOString().split('T')[0];
       const endStr = endDate.toISOString().split('T')[0];
@@ -780,7 +778,7 @@ export class DatabaseService {
       const { data, error } = await supabase
         .from('daily_logs')
         .select('*')
-        .eq('user_id', authUser.id)
+        .eq('user_id', userId)
         .gte('date', startStr)
         .lte('date', endStr)
         .order('date', { ascending: true });

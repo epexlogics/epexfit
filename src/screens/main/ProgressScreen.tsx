@@ -9,7 +9,7 @@
  * 5. Training Load aur PRs ab period-filtered activities pe based hain
  * 6. Period change par activities bhi refetch hoti hain
  */
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Dimensions, RefreshControl, ActivityIndicator,
@@ -23,7 +23,7 @@ import { databaseService } from '../../services/database';
 import { supabase } from '../../services/supabase';
 import { DailyLog, Activity } from '../../types';
 import { formatPace } from '../../utils/paceUtils';
-import { useUnitSystem, formatWeight, formatDistance } from '../../utils/units';
+import { useUnitSystem } from '../../utils/units';
 import { borderRadius, spacing } from '../../constants/theme';
 import { ChartScreenSkeleton } from '../../components/SkeletonLoader';
 import dayjs from '../../utils/dayjs';
@@ -301,8 +301,7 @@ export default function ProgressScreen() {
   const [bodyStats, setBodyStats] = useState<{ date: string; weight: number }[]>([]);
   const [bodyLoading, setBodyLoading] = useState(false);
 
-  // ── Data load ──────────────────────────────────────────────────────────────
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!user) return;
 
     const days = period === '30d' ? 30 : period === '90d' ? 90 : 365;
@@ -310,7 +309,6 @@ export default function ProgressScreen() {
     const startDate = new Date();
     startDate.setDate(endDate.getDate() - days);
 
-    // FIX: pass startDate + endDate to getActivities so period filter actually works
     const [{ data: l }, { data: a }] = await Promise.all([
       databaseService.getLogsInRange(user.id, startDate, endDate),
       databaseService.getActivities(user.id, startDate, endDate),
@@ -319,46 +317,36 @@ export default function ProgressScreen() {
     setLogs(l ?? []);
     setActivities(a ?? []);
     setIsLoading(false);
-
-    // body_stats fetch
-    if (tab === 'body') {
-      setBodyLoading(true);
-      const { data: bs } = await supabase
-        .from('body_stats')
-        .select('date, weight')
-        .eq('user_id', user.id)
-        .not('weight', 'is', null)
-        .order('date', { ascending: true })
-        .limit(60);
-      setBodyStats((bs ?? []).filter((r: any) => r.weight != null));
-      setBodyLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    setIsLoading(true);
-    load();
   }, [user, period]);
 
-  useEffect(() => {
-    if (tab !== 'body' || !user) return;
+  // Body stats — fetched separately when body tab is active
+  const loadBodyStats = useCallback(async () => {
+    if (!user) return;
     setBodyLoading(true);
-    supabase
+    const { data: bs } = await supabase
       .from('body_stats')
       .select('date, weight')
       .eq('user_id', user.id)
       .not('weight', 'is', null)
       .order('date', { ascending: true })
-      .limit(60)
-      .then(({ data: bs }) => {
-        setBodyStats((bs ?? []).filter((r: any) => r.weight != null));
-        setBodyLoading(false);
-      });
-  }, [tab, user]);
+      .limit(60);
+    setBodyStats((bs ?? []).filter((r: any) => r.weight != null));
+    setBodyLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    setIsLoading(true);
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (tab === 'body') loadBodyStats();
+  }, [tab, loadBodyStats]);
 
   const onRefresh = async () => {
     setRefreshing(true);
     await load();
+    if (tab === 'body') await loadBodyStats();
     setRefreshing(false);
   };
 

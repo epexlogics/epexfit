@@ -31,6 +31,10 @@ import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { TrackingProvider } from './context/TrackingContext';
 import { ToastProvider } from './contexts/ToastContext';
+import { WaterProvider } from './store/waterStore';
+import { SleepProvider } from './store/sleepStore';
+import { MoodProvider } from './store/moodStore';
+import { ActivityStoreProvider } from './store/activityStore';
 import AppNavigator from './navigation/AppNavigator';
 import ThemedPaperShell from './components/ThemedPaperShell';
 import { supabase } from './services/supabase';
@@ -199,9 +203,17 @@ export default function App() {
                 <AuthProvider>
                   <NotificationProvider>
                     <TrackingProvider>
-                      <NavigationContainer linking={linking}>
-                        <AppNavigator />
-                      </NavigationContainer>
+                      <ActivityStoreProvider>
+                        <WaterProvider>
+                          <SleepProvider>
+                            <MoodProvider>
+                              <NavigationContainer linking={linking}>
+                                <AppNavigator />
+                              </NavigationContainer>
+                            </MoodProvider>
+                          </SleepProvider>
+                        </WaterProvider>
+                      </ActivityStoreProvider>
                     </TrackingProvider>
                   </NotificationProvider>
                 </AuthProvider>

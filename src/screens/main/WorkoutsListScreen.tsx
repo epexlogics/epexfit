@@ -158,14 +158,14 @@ export default function WorkoutsListScreen({ navigation }: any) {
   const [exercises, setExercises] = useState<ExerciseForm[]>([]);
   const [currentEx, setCurrentEx] = useState<ExerciseForm>({ ...EMPTY_EX });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!user) return;
     const { data } = await databaseService.getWorkouts(user.id);
     setWorkouts(data ?? []);
     setLoading(false);
-  };
+  }, [user?.id]);
 
-  useEffect(() => { load(); }, [user]);
+  useEffect(() => { load(); }, [load]);
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const resetModal = () => {

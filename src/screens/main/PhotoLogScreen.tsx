@@ -10,6 +10,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { storageService } from '../../services/storage';
 import { databaseService } from '../../services/database';
+import { socialService } from '../../services/socialService';
 import AppIcon from '../../components/AppIcon';
 import { borderRadius } from '../../constants/theme';
 import { captureRef } from 'react-native-view-shot';
@@ -80,7 +81,11 @@ export default function PhotoLogScreen({ route, navigation }: any) {
       }
 
       Alert.alert('Saved!', 'Photo saved successfully!', [
-        { text: 'OK', onPress: () => navigation.navigate('Home') },
+        { text: 'Share to Feed', onPress: () => navigation.navigate('CreatePost', {
+          prefillActivityId: activity.id,
+          onPostCreated: () => navigation.navigate('Social'),
+        }) },
+        { text: 'Done', onPress: () => navigation.navigate('Home') },
       ]);
     } catch {
       Alert.alert('Error', 'Failed to save photo');

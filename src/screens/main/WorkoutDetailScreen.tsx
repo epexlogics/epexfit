@@ -49,12 +49,15 @@ export default function WorkoutDetailScreen({ route, navigation }: any) {
     useCallback(() => {
       let active = true;
       const refresh = async () => {
+        // FIX: use useAuth to get current user id reliably
+        // route.params.workout.userId may be undefined if workout was passed directly
+        const { supabase } = await import('../../services/supabase');
+        const { data: { user } } = await supabase.auth.getUser();
+        const ownerId = route.params.workout.userId || user?.id || '';
+        if (!ownerId) return;
         setLoading(true);
         try {
-          // getWorkouts returns all — find this specific one by id
-          const { data } = await databaseService.getWorkouts(
-            route.params.workout.userId ?? ''
-          );
+          const { data } = await databaseService.getWorkouts(ownerId);
           const updated = (data ?? []).find((w) => w.id === route.params.workout.id);
           if (updated && active) setWorkout(updated);
         } catch {
@@ -65,7 +68,7 @@ export default function WorkoutDetailScreen({ route, navigation }: any) {
       };
       refresh();
       return () => { active = false; };
-    }, [route.params.workout.id])
+    }, [route.params.workout.id, route.params.workout.userId])
   );
 
   const handleDelete = () => {

@@ -1,17 +1,11 @@
 /**
- * SocialFeedScreen — Real-time social feed
+ * SocialFeedScreen — Fixed social feed
  *
- * ✅ Real Supabase data (activity_feed table)
- * ✅ Optimistic like toggle + DB write
- * ✅ Real-time: new posts, likes, comments via Supabase Realtime
- * ✅ Counts update live without manual refresh
- * ✅ Zero mock data
- *
- * FIX APPLIED: Added Supabase Realtime channels for:
- *   - activity_feed INSERT  → auto-reload feed
- *   - feed_likes INSERT/DELETE → live likeCount delta
- *   - feed_comments INSERT/DELETE → live commentCount delta
- * Channels cleaned up on screen blur via useFocusEffect return.
+ * FIXES:
+ * - Feed only shows posts from followed users + own posts (via socialService)
+ * - Create Post button → CreatePostScreen
+ * - Feed refreshes after new post created
+ * - Realtime channels for likes/comments
  */
 import React, { useState, useCallback, useRef } from 'react';
 import {
@@ -47,6 +41,7 @@ const FEED_TYPE_META: Record<string, { emoji: string; label: string; color: stri
   nutrition_logged:   { emoji: '🥗', label: 'hit their nutrition goal', color: '#4ADE80' },
   steps_goal:         { emoji: '👟', label: 'crushed their step goal', color: '#38BDF8' },
   badge_earned:       { emoji: '🏅', label: 'earned a badge',         color: '#FBBF24' },
+  social_post:        { emoji: '📝', label: 'shared a post',          color: '#22D3EE' },
 };
 
 function FeedCard({
@@ -146,6 +141,20 @@ function FeedCard({
         </View>
       )}
 
+      {/* Social post text content */}
+      {(item.type === 'social_post' || item.content) && item.content ? (
+        <Text style={[fc.postContent, { color: colors.text }]}>{item.content}</Text>
+      ) : null}
+
+      {/* Social post image */}
+      {item.imageUrl ? (
+        <Image
+          source={{ uri: item.imageUrl }}
+          style={fc.postImage}
+          resizeMode="cover"
+        />
+      ) : null}
+
       {/* Action bar */}
       <View style={fc.actionBar}>
         <TouchableOpacity
@@ -184,6 +193,7 @@ export default function SocialFeedScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [fromCache, setFromCache] = useState(false);
   const channelsRef = useRef<ReturnType<typeof supabase.channel>[]>([]);
+  const feedDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadFeed = useCallback(async () => {
     const { items: feed, fromCache: cached } = await socialService.getFeed(40);
@@ -198,12 +208,16 @@ export default function SocialFeedScreen() {
     channelsRef.current.forEach(ch => ch.unsubscribe());
     channelsRef.current = [];
 
-    // New posts → reload full feed (need actor profile data)
+    // New posts → debounced reload (avoids storm when multiple inserts happen)
     const feedCh = supabase
       .channel('rt_feed_posts')
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'activity_feed' },
-        () => loadFeed(),
+        () => {
+          // FIX: debounce to avoid rapid reloads from burst inserts
+          if (feedDebounceRef.current) clearTimeout(feedDebounceRef.current);
+          feedDebounceRef.current = setTimeout(() => loadFeed(), 800);
+        },
       )
       .subscribe();
 
@@ -266,6 +280,8 @@ export default function SocialFeedScreen() {
     return () => {
       channelsRef.current.forEach(ch => ch.unsubscribe());
       channelsRef.current = [];
+      // FIX: clear debounce timer on unmount to prevent setState after unmount
+      if (feedDebounceRef.current) clearTimeout(feedDebounceRef.current);
     };
   }, [loadFeed, setupRealtime]));
 
@@ -302,6 +318,14 @@ export default function SocialFeedScreen() {
               <Text style={{ fontSize: 10, color: '#FF9500', fontWeight: '700' }}>📶 Cached</Text>
             </View>
           )}
+          <TouchableOpacity
+            style={[s.findBtn, { backgroundColor: accent + '15', borderColor: accent + '40' }]}
+            onPress={() => navigation.navigate('CreatePost')}
+            activeOpacity={0.8}
+          >
+            <Text style={{ fontSize: 14 }}>✏️</Text>
+            <Text style={[s.findBtnText, { color: accent }]}>Post</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[s.findBtn, { backgroundColor: accent + '15', borderColor: accent + '40' }]}
             onPress={() => navigation.navigate('DirectMessages')}
@@ -355,14 +379,24 @@ export default function SocialFeedScreen() {
               <Text style={[s.emptySub, { color: colors.textSecondary }]}>
                 Follow other EpexFit users to see their workouts, goals, and streaks here.
               </Text>
-              <TouchableOpacity
-                style={[s.findPeopleBtn, { backgroundColor: accent, marginTop: 8 }]}
-                onPress={() => navigation.navigate('UserSearch')}
-                activeOpacity={0.85}
-              >
-                <Text style={{ fontSize: 16 }}>👥</Text>
-                <Text style={s.findPeopleBtnText}>Find People to Follow</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+                <TouchableOpacity
+                  style={[s.findPeopleBtn, { backgroundColor: accent }]}
+                  onPress={() => navigation.navigate('CreatePost')}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ fontSize: 16 }}>✏️</Text>
+                  <Text style={s.findPeopleBtnText}>Create Post</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.findPeopleBtn, { backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: accent }]}
+                  onPress={() => navigation.navigate('UserSearch')}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ fontSize: 16 }}>👥</Text>
+                  <Text style={[s.findPeopleBtnText, { color: accent }]}>Find People</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           }
         />
@@ -395,6 +429,8 @@ const fc = StyleSheet.create({
   statVal: { fontSize: 20, fontWeight: '900' },
   statUnit: { fontSize: 11, fontWeight: '600' },
   goalText: { fontSize: 14, fontWeight: '700' },
+  postContent: { fontSize: 15, lineHeight: 22 },
+  postImage: { width: '100%', height: 200, borderRadius: 12 },
   actionBar: { flexDirection: 'row', gap: 8 },
   actionBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,

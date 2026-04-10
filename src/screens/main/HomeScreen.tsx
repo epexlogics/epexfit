@@ -23,7 +23,6 @@ import React, {
   useEffect,
   useRef,
   useState,
-  useLayoutEffect,
 } from 'react';
 import {
   Animated,
@@ -46,18 +45,22 @@ import { useAuth } from '../../context/AuthContext';
 import { useTracking } from '../../context/TrackingContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useNotifications } from '../../context/NotificationContext';
+import { useWater } from '../../store/waterStore';
+import { useSleep } from '../../store/sleepStore';
+import { useMood } from '../../store/moodStore';
+import { useActivityStore } from '../../store/activityStore';
 import { supabase } from '../../services/supabase';
 import { databaseService } from '../../services/database';
 import { recalculateStreak, syncBadges, getUnlockedBadgeIds } from '../../services/streaks';
 import { calculateAPS, calcProteinGoal } from '../../utils/performanceScore';
 import { generateInsight, getDailyChallenge, isChallengeComplete } from '../../utils/insights';
-import { DailyLog, Activity, Goal } from '../../types';
+import { DailyLog, Goal } from '../../types';
 import { BADGE_DEFINITIONS, BadgeDefinition } from '../../constants/badges';
 import { STORAGE_KEYS } from '../../constants/config';
 import { spacing, borderRadius, typography } from '../../constants/theme';
 import dayjs from '../../utils/dayjs';
 
-import { useUnitSystem, formatDistance, distLabel } from '../../utils/units';
+import { useUnitSystem } from '../../utils/units';
 import AppIcon from '../../components/AppIcon';
 import BadgeUnlockModal from '../../components/BadgeUnlockModal';
 import WeeklySnapshotModal, {
@@ -401,7 +404,11 @@ export default function HomeScreen({ navigation }: any) {
   const { user } = useAuth();
   const { colors, isDark } = useTheme();
   const unitSystem = useUnitSystem();
-  const { steps: trackingSteps, distance: trackingDist, calories: trackingCal } = useTracking();
+  const { isTracking } = useTracking();
+  const waterStore = useWater();
+  const sleepStore = useSleep();
+  const moodStore = useMood();
+  const activityStore = useActivityStore();
   const { sendSmartNotifications, notifyBadgeUnlocked } = useNotifications();
 
   // ── State ─────────────────────────────────────────────────────────────────
@@ -449,7 +456,6 @@ export default function HomeScreen({ navigation }: any) {
 
     try {
       setLoadError(null);
-      console.log('[DEBUG] loadData step 1: start');
 
       // ── Week bounds ───────────────────────────────────────────────────────
       const now = new Date();
@@ -463,9 +469,6 @@ export default function HomeScreen({ navigation }: any) {
         profileResult,
         workoutsResult,
         foodLogsResult,
-        waterResult,
-        sleepResult,
-        moodResult,
         challengeResult,
         userChallengeResult,
         achievementsResult,
@@ -473,94 +476,19 @@ export default function HomeScreen({ navigation }: any) {
         goalsResult,
         streakResult,
         badgeIdsResult,
-      console.log('[DEBUG] loadData step 2: before Promise.allSettled');
       ] = await Promise.allSettled([
-        // 1. Profile (avatar_url)
-        supabase
-          .from('profiles')
-          .select('avatar_url, full_name')
-          .eq('id', user.id)
-          .single(),
-
-        // 2. Workouts this week (for weekly chart + calories + active mins)
-        supabase
-          .from('workouts')
-          .select('id, duration_minutes, calories_burned, date, name, type')
-          .eq('user_id', user.id)
-          .gte('date', weekStart)
-          .lte('date', weekEnd)
-          .order('date', { ascending: true }),
-
-        // 3. Food logs today (for feed + calories)
-        supabase
-          .from('food_logs')
-          .select('id, calories, meal_type, date, created_at')
-          .eq('user_id', user.id)
-          .eq('date', today)
-          .order('created_at', { ascending: false })
-          .limit(5),
-
-        // 4. Water today
-        supabase
-          .from('water_logs')
-          .select('id, glasses, date')
-          .eq('user_id', user.id)
-          .eq('date', today)
-          .single(),
-
-        // 5. Sleep today
-        supabase
-          .from('sleep_logs')
-          .select('id, hours, date')
-          .eq('user_id', user.id)
-          .eq('date', today)
-          .single(),
-
-        // 6. Mood today
-        supabase
-          .from('mood_logs')
-          .select('id, rating, date')
-          .eq('user_id', user.id)
-          .eq('date', today)
-          .single(),
-
-        // 7. Today's challenge
-        supabase
-          .from('challenges')
-          .select('id, title, target, target_unit, reward')
-          .limit(1)
-          .order('id', { ascending: true }),
-
-        // 8. User's challenge progress today
-        supabase
-          .from('user_challenges')
-          .select('id, challenge_id, progress, completed')
-          .eq('user_id', user.id)
-          .gte('created_at', dayjs().startOf('day').toISOString())
-          .limit(1),
-
-        // 9. Recent achievements (last 10)
-        supabase
-          .from('user_achievements')
-          .select('id, achievement_type, earned_at')
-          .eq('user_id', user.id)
-          .order('earned_at', { ascending: false })
-          .limit(10),
-
-        // 10. Daily log for today (steps, distance, protein)
+        supabase.from('profiles').select('avatar_url, full_name').eq('id', user.id).maybeSingle(),
+        supabase.from('workouts').select('id, duration_minutes, calories_burned, date, name, type').eq('user_id', user.id).gte('date', weekStart).lte('date', weekEnd).order('date', { ascending: true }),
+        supabase.from('food_logs').select('id, calories, meal_type, date, created_at').eq('user_id', user.id).eq('date', today).order('created_at', { ascending: false }).limit(5),
+        supabase.from('challenges').select('id, title, target, target_unit, reward').limit(1).order('id', { ascending: true }),
+        supabase.from('user_challenges').select('id, challenge_id, progress, completed').eq('user_id', user.id).gte('created_at', dayjs().startOf('day').toISOString()).limit(1),
+        supabase.from('user_achievements').select('id, achievement_type, earned_at').eq('user_id', user.id).order('earned_at', { ascending: false }).limit(10),
         databaseService.getDailyLog(user.id, new Date()),
-
-        // 11. User goals
         databaseService.getGoals(user.id),
-
-        // 12. Streak calculation
         recalculateStreak(user.id),
-
-        // 13. Unlocked badge IDs (legacy system)
         getUnlockedBadgeIds(user.id),
       ]);
 
-      console.log('[DEBUG] loadData step 3: after Promise.allSettled');
       // ── Extract results safely ────────────────────────────────────────────
       const profile =
         profileResult.status === 'fulfilled' ? profileResult.value.data : null;
@@ -574,15 +502,6 @@ export default function HomeScreen({ navigation }: any) {
         foodLogsResult.status === 'fulfilled'
           ? (foodLogsResult.value.data ?? [])
           : [];
-
-      const waterLog: WaterLogRow | null =
-        waterResult.status === 'fulfilled' ? waterResult.value.data : null;
-
-      const sleepLog: SleepLogRow | null =
-        sleepResult.status === 'fulfilled' ? sleepResult.value.data : null;
-
-      const moodLog: MoodLogRow | null =
-        moodResult.status === 'fulfilled' ? moodResult.value.data : null;
 
       const challengeRows: ChallengeRow[] =
         challengeResult.status === 'fulfilled'
@@ -641,29 +560,14 @@ export default function HomeScreen({ navigation }: any) {
         if (rg) { distGoal = rg.target; }
       }
 
-      // ── Today metrics ─────────────────────────────────────────────────────
-      // Steps: daily_logs first, then pedometer context
-      const stepsToday = dailyLog?.steps ?? trackingSteps ?? 0;
-
-      // Distance: daily_logs first, then pedometer context
-      // Fallback: steps × default stride (0.76m)
-      const distanceToday =
-        dailyLog?.distance ??
-        trackingDist ??
-        parseFloat(((stepsToday * 0.76) / 1000).toFixed(2));
+      // ── Today metrics — read from feature stores (single source of truth) ──
+      // activityStore owns steps/distance/calories from daily_logs
+      const stepsToday = activityStore.steps;
+      const distanceToday = activityStore.distance;
+      const caloriesToday = activityStore.calories;
 
       // Today's workouts (subset of weekly)
       const todayWorkouts = workouts.filter((w) => w.date === today);
-
-      // Calories: sum of today's workout calories_burned
-      const workoutCaloriesToday = todayWorkouts.reduce(
-        (sum, w) => sum + (w.calories_burned ?? 0),
-        0
-      );
-      const caloriesToday =
-        workoutCaloriesToday > 0
-          ? workoutCaloriesToday
-          : dailyLog?.calories ?? trackingCal ?? 0;
 
       // Active minutes: sum of today's workout durations
       const activeMinsToday = todayWorkouts.reduce(
@@ -671,10 +575,10 @@ export default function HomeScreen({ navigation }: any) {
         0
       );
 
-      // Water / sleep / mood
-      const waterToday = waterLog?.glasses ?? dailyLog?.water ?? 0;
-      const sleepHours = sleepLog?.hours ?? dailyLog?.sleep ?? 0;
-      const moodRating = moodLog?.rating ?? dailyLog?.mood ?? 3;
+      // Water / sleep / mood — from dedicated stores
+      const waterToday = waterStore.glasses;
+      const sleepHours = sleepStore.hours;
+      const moodRating = moodStore.rating;
       const proteinToday = dailyLog?.protein ?? 0;
 
       // ── Weekly chart (workout minutes per day, Mon=0…Sun=6) ──────────────
@@ -693,7 +597,6 @@ export default function HomeScreen({ navigation }: any) {
       });
 
       // Also pull distance from activities this week for accurate km
-      console.log('[DEBUG] loadData step 4: before activitiesWeek');
       const { data: activitiesWeek } = await supabase
         .from('activities')
         .select('distance, start_time')
@@ -705,7 +608,6 @@ export default function HomeScreen({ navigation }: any) {
         weeklyDistance += a.distance ?? 0;
       });
 
-      console.log('[DEBUG] loadData step 5: after activitiesWeek');
       const weeklyWorkoutCount = workouts.length;
 
       // ── Best streak from achievements ─────────────────────────────────────
@@ -790,26 +692,24 @@ export default function HomeScreen({ navigation }: any) {
       const completedWorkoutsThisWeek = weeklyWorkoutCount;
 
       // ── Insight ───────────────────────────────────────────────────────────
-      console.log('[DEBUG] loadData step 6: before getWeeklyStepsByDay');
       const weeklySteps = await databaseService.getWeeklyStepsByDay(user.id, new Date(weekStart));
       const bestDaySteps = Array.isArray(weeklySteps) && weeklySteps.length > 0
         ? Math.max(...weeklySteps)
         : 0;
 
       const insight = generateInsight({
-        avgSleepHours: sleepHours,
+        avgSleepHours: sleepStore.hours,
         bestDaySteps,
-        weeklyStepsChange: 0, // would require prev week, skip for now
+        weeklyStepsChange: 0,
         currentStreak,
-        waterToday,
+        waterToday: waterStore.glasses,
         proteinToday,
-        stepsToday,
+        stepsToday: activityStore.steps,
         stepGoal,
       });
 
       // ── Weekly snapshot ───────────────────────────────────────────────────
       let snapshotData = null;
-      console.log('[DEBUG] loadData step 7: before shouldShowWeeklySnapshot');
       if (await shouldShowWeeklySnapshot()) {
         snapshotData = {
           totalSteps: stepsToday,
@@ -823,7 +723,6 @@ export default function HomeScreen({ navigation }: any) {
         };
       }
 
-      console.log('[DEBUG] loadData step 8: before syncBadges');
       // ── Sync badges in background ─────────────────────────────────────────
       syncBadges(user.id)
         .then((newBadges) => {
@@ -835,7 +734,6 @@ export default function HomeScreen({ navigation }: any) {
         .catch(() => {});
 
       // ── Assemble final data object ────────────────────────────────────────
-      console.log('[DEBUG] loadData step 9: before setData');
       setData({
         avatarUrl,
         stepsToday,
@@ -876,12 +774,12 @@ export default function HomeScreen({ navigation }: any) {
 
       // ── Smart notifications in background ────────────────────────────────
       sendSmartNotifications({
-        stepsToday,
+        stepsToday: activityStore.steps,
         stepGoal,
         streak: currentStreak,
         distanceToday: weeklyDistance,
         distanceGoal: distGoal,
-        waterToday,
+        waterToday: waterStore.glasses,
         waterGoal: DEFAULT_WATER_GOAL,
       }).catch(() => {});
 
@@ -894,7 +792,7 @@ export default function HomeScreen({ navigation }: any) {
       console.error('[HomeScreen] loadData crash:', msg, err?.stack ?? '');
       setLoadError(msg);
     }
-  }, [user, trackingSteps, trackingDist, trackingCal, colors]);
+  }, [user, activityStore.steps, activityStore.distance, activityStore.calories, waterStore.glasses, sleepStore.hours, moodStore.rating, colors]);
 
 
   // ── Initial load ──────────────────────────────────────────────────────────
@@ -925,22 +823,9 @@ export default function HomeScreen({ navigation }: any) {
         { event: '*', schema: 'public', table: 'workouts', filter: `user_id=eq.${user.id}` },
         debouncedLoad
       )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'water_logs', filter: `user_id=eq.${user.id}` },
-        debouncedLoad
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'sleep_logs', filter: `user_id=eq.${user.id}` },
-        debouncedLoad
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'mood_logs', filter: `user_id=eq.${user.id}` },
-        debouncedLoad
-      )
       .subscribe();
+      // Note: water_logs / sleep_logs / mood_logs realtime is handled by their
+      // respective stores — no duplicate subscriptions needed here.
 
     return () => {
       realtimeSub.current?.unsubscribe();
@@ -956,41 +841,10 @@ export default function HomeScreen({ navigation }: any) {
   }, [loadData]);
 
   // ── Quick metric update helpers ───────────────────────────────────────────
-  const upsertWater = useCallback(
-    async (glasses: number) => {
-      if (!user) return;
-      await supabase.from('water_logs').upsert(
-        { user_id: user.id, date: today, glasses },
-        { onConflict: 'user_id,date' }
-      );
-      setData((d) => d ? { ...d, waterToday: glasses } : d);
-    },
-    [user, today]
-  );
-
-  const upsertSleep = useCallback(
-    async (hours: number) => {
-      if (!user) return;
-      await supabase.from('sleep_logs').upsert(
-        { user_id: user.id, date: today, hours },
-        { onConflict: 'user_id,date' }
-      );
-      setData((d) => d ? { ...d, sleepHours: hours } : d);
-    },
-    [user, today]
-  );
-
-  const upsertMood = useCallback(
-    async (rating: number) => {
-      if (!user) return;
-      await supabase.from('mood_logs').upsert(
-        { user_id: user.id, date: today, rating },
-        { onConflict: 'user_id,date' }
-      );
-      setData((d) => d ? { ...d, moodRating: rating } : d);
-    },
-    [user, today]
-  );
+  // Water/sleep/mood mutations now delegate to stores
+  const upsertWater = waterStore.upsertWater;
+  const upsertSleep = sleepStore.upsertSleep;
+  const upsertMood = moodStore.upsertMood;
 
   const markChallengeComplete = useCallback(async () => {
     if (!user || !data?.todayChallenge) return;
@@ -1039,21 +893,21 @@ export default function HomeScreen({ navigation }: any) {
         calBurned: data.caloriesToday,
         proteinGoal: data.proteinGoal,
         proteinActual: data.proteinToday,
-        waterGoal: data.waterGoal,
-        waterActual: data.waterToday,
-        sleepHours: data.sleepHours,
-        mood: data.moodRating,
+        waterGoal: waterStore.goal,
+        waterActual: waterStore.glasses,
+        sleepHours: sleepStore.hours,
+        mood: moodStore.rating,
         bodyWeightKg: user?.weight,
       })
     : { total: 0, label: 'Loading', color: accent, tip: '' };
 
   // ── New user check — koi bhi activity nahi logged ────────────────────────
   const isNewUser = data != null &&
-    data.stepsToday === 0 &&
-    data.caloriesToday === 0 &&
+    activityStore.steps === 0 &&
+    activityStore.calories === 0 &&
     data.completedWorkoutsThisWeek === 0 &&
-    data.waterToday === 0 &&
-    data.sleepHours === 0;
+    waterStore.glasses === 0 &&
+    sleepStore.hours === 0;
 
   // ── Challenge completion check ────────────────────────────────────────────
   const challengeDone =
@@ -1069,9 +923,9 @@ export default function HomeScreen({ navigation }: any) {
             difficulty: 'medium',
           },
           {
-            steps: data.stepsToday,
-            water: data.waterToday,
-            sleep: data.sleepHours,
+            steps: activityStore.steps,
+            water: waterStore.glasses,
+            sleep: sleepStore.hours,
             protein: data.proteinToday,
           }
         )
@@ -1327,7 +1181,7 @@ export default function HomeScreen({ navigation }: any) {
               {[
                 {
                   icon: 'shoe-print',
-                  value: data?.stepsToday ?? 0,
+                  value: activityStore.steps,
                   unit: '',
                   label: 'Steps',
                   goal: data?.stepGoal ?? DEFAULT_STEP_GOAL,
@@ -1337,7 +1191,7 @@ export default function HomeScreen({ navigation }: any) {
                 },
                 {
                   icon: 'fire',
-                  value: data?.caloriesToday ?? 0,
+                  value: activityStore.calories,
                   unit: 'kcal',
                   label: 'Calories',
                   goal: data?.calGoal ?? DEFAULT_CAL_GOAL,
@@ -1348,8 +1202,8 @@ export default function HomeScreen({ navigation }: any) {
                 {
                   icon: 'map-marker-distance',
                   value: unitSystem === 'imperial'
-                    ? (data?.distanceToday ?? 0) * 0.621371
-                    : (data?.distanceToday ?? 0),
+                    ? activityStore.distance * 0.621371
+                    : activityStore.distance,
                   unit: unitSystem === 'imperial' ? 'mi' : 'km',
                   label: 'Distance',
                   goal: unitSystem === 'imperial'
@@ -1594,7 +1448,7 @@ export default function HomeScreen({ navigation }: any) {
         {/* ─── 7. TODAY'S METRICS DETAIL (editable) ───────────────────── */}
         <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>TODAY'S METRICS</Text>
         <View style={styles.tilesRow}>
-          {/* Water — tap +/- */}
+          {/* Water — reads from waterStore */}
           <TouchableOpacity
             onPress={() => setEditingWater((v) => !v)}
             style={[styles.tile, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
@@ -1603,7 +1457,7 @@ export default function HomeScreen({ navigation }: any) {
             <View style={[styles.tileIcon, { backgroundColor: colors.metricHydration + '18' }]}>
               <AppIcon name="water" size={16} color={colors.metricHydration} />
             </View>
-            <Text style={[styles.tileVal, { color: colors.text }]}>{data?.waterToday ?? 0}</Text>
+            <Text style={[styles.tileVal, { color: colors.text }]}>{waterStore.glasses}</Text>
             <Text style={[styles.tileLbl, { color: colors.textSecondary }]}>Water 💧</Text>
             <View style={[styles.tileTrack, { backgroundColor: colors.metricHydration + '22' }]}>
               <View
@@ -1611,7 +1465,7 @@ export default function HomeScreen({ navigation }: any) {
                   styles.tileFill,
                   {
                     backgroundColor: colors.metricHydration,
-                    width: `${Math.min(((data?.waterToday ?? 0) / DEFAULT_WATER_GOAL) * 100, 100)}%`,
+                    width: `${Math.min((waterStore.glasses / waterStore.goal) * 100, 100)}%`,
                   },
                 ]}
               />
@@ -1619,13 +1473,13 @@ export default function HomeScreen({ navigation }: any) {
             {editingWater && (
               <View style={styles.inlineEdit}>
                 <TouchableOpacity
-                  onPress={() => upsertWater(Math.max(0, (data?.waterToday ?? 0) - 1))}
+                  onPress={waterStore.removeGlass}
                   style={[styles.editBtn, { backgroundColor: colors.border }]}
                 >
                   <Text style={{ color: colors.text, fontWeight: '900', fontSize: 16 }}>−</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => upsertWater((data?.waterToday ?? 0) + 1)}
+                  onPress={waterStore.addGlass}
                   style={[styles.editBtn, { backgroundColor: accent }]}
                 >
                   <Text style={{ color: colors.onPrimary, fontWeight: '900', fontSize: 16 }}>+</Text>
@@ -1634,7 +1488,7 @@ export default function HomeScreen({ navigation }: any) {
             )}
           </TouchableOpacity>
 
-          {/* Sleep — tap +/- */}
+          {/* Sleep — reads from sleepStore */}
           <TouchableOpacity
             onPress={() => setEditingSleep((v) => !v)}
             style={[styles.tile, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
@@ -1643,7 +1497,7 @@ export default function HomeScreen({ navigation }: any) {
             <View style={[styles.tileIcon, { backgroundColor: colors.metricSleep + '18' }]}>
               <AppIcon name="sleep" size={16} color={colors.metricSleep} />
             </View>
-            <Text style={[styles.tileVal, { color: colors.text }]}>{data?.sleepHours ?? 0}h</Text>
+            <Text style={[styles.tileVal, { color: colors.text }]}>{sleepStore.hours}h</Text>
             <Text style={[styles.tileLbl, { color: colors.textSecondary }]}>Sleep 😴</Text>
             <View style={[styles.tileTrack, { backgroundColor: colors.metricSleep + '22' }]}>
               <View
@@ -1651,7 +1505,7 @@ export default function HomeScreen({ navigation }: any) {
                   styles.tileFill,
                   {
                     backgroundColor: colors.metricSleep,
-                    width: `${Math.min(((data?.sleepHours ?? 0) / DEFAULT_SLEEP_GOAL) * 100, 100)}%`,
+                    width: `${Math.min((sleepStore.hours / sleepStore.goal) * 100, 100)}%`,
                   },
                 ]}
               />
@@ -1659,13 +1513,13 @@ export default function HomeScreen({ navigation }: any) {
             {editingSleep && (
               <View style={styles.inlineEdit}>
                 <TouchableOpacity
-                  onPress={() => upsertSleep(Math.max(0, (data?.sleepHours ?? 0) - 0.5))}
+                  onPress={() => upsertSleep(Math.max(0, sleepStore.hours - 0.5))}
                   style={[styles.editBtn, { backgroundColor: colors.border }]}
                 >
                   <Text style={{ color: colors.text, fontWeight: '900', fontSize: 16 }}>−</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => upsertSleep(Math.min(12, (data?.sleepHours ?? 0) + 0.5))}
+                  onPress={() => upsertSleep(Math.min(12, sleepStore.hours + 0.5))}
                   style={[styles.editBtn, { backgroundColor: accent }]}
                 >
                   <Text style={{ color: colors.onPrimary, fontWeight: '900', fontSize: 16 }}>+</Text>
@@ -1674,20 +1528,20 @@ export default function HomeScreen({ navigation }: any) {
             )}
           </TouchableOpacity>
 
-          {/* Mood — tap to cycle rating */}
+          {/* Mood — reads from moodStore */}
           <TouchableOpacity
             onPress={() => {
-              const next = ((data?.moodRating ?? 3) % 5) + 1;
+              const next = ((moodStore.rating % 5) + 1) as 1|2|3|4|5;
               upsertMood(next);
             }}
             style={[styles.tile, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
             activeOpacity={0.75}
           >
             <View style={[styles.tileIcon, { backgroundColor: colors.primary + '18' }]}>
-              <Text style={{ fontSize: 14 }}>{getMoodEmoji(data?.moodRating ?? 3)}</Text>
+              <Text style={{ fontSize: 14 }}>{getMoodEmoji(moodStore.rating)}</Text>
             </View>
             <Text style={[styles.tileVal, { color: colors.text }]}>
-              {getMoodEmoji(data?.moodRating ?? 3)}
+              {getMoodEmoji(moodStore.rating)}
             </Text>
             <Text style={[styles.tileLbl, { color: colors.textSecondary }]}>Mood</Text>
             <View style={[styles.tileTrack, { backgroundColor: accent + '22' }]}>
@@ -1696,7 +1550,7 @@ export default function HomeScreen({ navigation }: any) {
                   styles.tileFill,
                   {
                     backgroundColor: accent,
-                    width: `${((data?.moodRating ?? 3) / 5) * 100}%`,
+                    width: `${(moodStore.rating / 5) * 100}%`,
                   },
                 ]}
               />

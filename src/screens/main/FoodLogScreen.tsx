@@ -22,6 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { databaseService } from '../../services/database';
+import { supabase } from '../../services/supabase';
 import { useFoodSearch, foodLogService, FoodItem, FoodLogEntry } from '../../hooks/useFoodSearch';
 import AppIcon from '../../components/AppIcon';
 import { borderRadius, spacing } from '../../constants/theme';
@@ -131,6 +132,7 @@ export default function FoodLogScreen() {
   const accent = colors.primary;
   const { results, loading: searching, search, clear, searchSource } = useFoodSearch();
 
+  // FIX: compute today dynamically so midnight rollover works correctly
   const today = dayjs().format('YYYY-MM-DD');
 
   // State
@@ -198,23 +200,17 @@ export default function FoodLogScreen() {
     ];
     const t = calcNutrition(all);
     try {
-      const { data: existing } = await databaseService.getDailyLog(user.id, new Date());
-      await databaseService.saveDailyLog({
-        userId:   user.id,
-        date:     today,
-        steps:    existing?.steps    ?? 0,
-        distance: existing?.distance ?? 0,
-        calories: existing?.calories ?? 0,
-        water:    existing?.water    ?? 0,
-        protein:  t.protein,
-        fiber:    t.fiber,
-        sleep:    existing?.sleep    ?? 0,
-        mood:     existing?.mood     ?? 3,
-      });
+      const currentDate = dayjs().format('YYYY-MM-DD'); // FIX: always current date
+      await supabase
+        .from('daily_logs')
+        .upsert(
+          { user_id: user.id, date: currentDate, protein: t.protein, fiber: t.fiber },
+          { onConflict: 'user_id,date' }
+        );
     } catch {
       // silent — not blocking UX
     }
-  }, [user, today]);
+  }, [user]);
 
   // ── Open search modal ─────────────────────────────────────────────────────
   const openSearch = (meal: MealType) => {
@@ -231,7 +227,8 @@ export default function FoodLogScreen() {
     setAddingFood(true);
     try {
       const grams = parseFloat(servingG) || 100;
-      const entry = await foodLogService.add(user.id, today, activeMeal, selectedFood, grams);
+      const currentDate = dayjs().format('YYYY-MM-DD'); // FIX: always current date
+      const entry = await foodLogService.add(user.id, currentDate, activeMeal, selectedFood, grams);
       if (!entry) throw new Error('Save failed');
 
       const updated: MealState = {
@@ -249,7 +246,7 @@ export default function FoodLogScreen() {
     } finally {
       setAddingFood(false);
     }
-  }, [selectedFood, activeMeal, user, servingG, meals, today, syncDailyLog]);
+  }, [selectedFood, activeMeal, user, servingG, meals, syncDailyLog]);
 
   // ── Remove entry (deletes from Supabase) ─────────────────────────────────
   const removeEntry = useCallback(async (meal: MealType, entryId: string) => {

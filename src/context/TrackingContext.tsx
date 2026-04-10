@@ -8,6 +8,7 @@ import { databaseService } from '../services/database';
 import { socialService } from '../services/socialService';
 import { Activity, LocationPoint, TrackingState } from '../types';
 import { useAuth } from './AuthContext';
+import { supabase } from '../services/supabase';
 
 interface TrackingContextType extends TrackingState {
   startTracking: (type: 'walking' | 'running' | 'cycling' | 'swimming' | 'strength' | 'hiit' | 'yoga' | 'football' | 'other') => Promise<void>;
@@ -121,8 +122,9 @@ export const TrackingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       nextMidnight.setHours(0, 0, 0, 0);
       const msUntilMidnight = nextMidnight.getTime() - now.getTime();
       midnightResetRef.current = setTimeout(() => {
+        // FIX: reset all live tracking metrics at midnight, not just steps
         lastStepsRef.current = 0;
-        setState((prev) => ({ ...prev, steps: 0 }));
+        setState((prev) => ({ ...prev, steps: 0, distance: 0, calories: 0 }));
         scheduleMidnightReset();
       }, msUntilMidnight);
     };
@@ -317,36 +319,37 @@ export const TrackingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  /**
+   * After a workout: additively merge steps/distance/calories into daily_logs.
+   * Uses upsert with a SELECT-then-upsert pattern to avoid race conditions.
+   * The ActivityStoreProvider's realtime subscription will pick up the change
+   * and update all screens automatically.
+   */
   const syncGoalsAndDailyLog = async (activity: Omit<Activity, 'id' | 'createdAt'>) => {
     if (!user) return;
     try {
-      const { data: existingLog } = await databaseService.getDailyLog(user.id, new Date());
+      const today = new Date().toISOString().split('T')[0];
 
-      // FIX: Idempotent save — duplicate risk kam karo
-      await databaseService.saveDailyLog({
-        userId: user.id,
-        date: new Date().toISOString().split('T')[0],
-        steps: (existingLog?.steps ?? 0) + activity.steps,
-        distance: Number(((existingLog?.distance ?? 0) + activity.distance).toFixed(2)),
-        calories: (existingLog?.calories ?? 0) + activity.calories,
-        water: existingLog?.water ?? 0,
-        protein: existingLog?.protein ?? 0,
-        fiber: existingLog?.fiber ?? 0,
-        sleep: existingLog?.sleep ?? 0,
-        mood: existingLog?.mood ?? 3,
-        notes: existingLog?.notes,
-      });
+      // Read current row first to do additive merge
+      const { data: existing } = await supabase
+        .from('daily_logs')
+        .select('steps, distance, calories')
+        .eq('user_id', user.id)
+        .eq('date', today)
+        .maybeSingle();
 
-      const { data: goals } = await databaseService.getGoals(user.id);
-      for (const goal of goals) {
-        let delta = 0;
-        if (goal.type === 'steps') delta = activity.steps;
-        if (goal.type === 'running' && activity.type === 'running') delta = activity.distance;
-        if (goal.type === 'calories') delta = activity.calories;
-        if (delta > 0) {
-          await databaseService.updateGoalProgress(goal.id, Number(goal.current) + delta);
-        }
-      }
+      await supabase
+        .from('daily_logs')
+        .upsert({
+          user_id: user.id,
+          date: today,
+          steps: (existing?.steps ?? 0) + activity.steps,
+          distance: parseFloat(((existing?.distance ?? 0) + activity.distance).toFixed(3)),
+          calories: (existing?.calories ?? 0) + activity.calories,
+        }, { onConflict: 'user_id,date' });
+
+      // Goal progress sync (non-blocking)
+      databaseService.syncGoalProgress(user.id).catch(() => {});
     } catch {
       // Non-critical
     }

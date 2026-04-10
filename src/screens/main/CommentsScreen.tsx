@@ -79,7 +79,7 @@ export default function CommentsScreen() {
           table: 'feed_comments',
           filter: `feed_item_id=eq.${feedItemId}`,
         },
-        async (payload) => {
+        async () => {
           // Reload to get joined profile data for the new comment
           const updated = await socialService.getComments(feedItemId);
           setComments(updated);
@@ -104,7 +104,7 @@ export default function CommentsScreen() {
       .subscribe();
 
     return () => { channel.unsubscribe(); };
-  }, [feedItemId, loadComments]);
+  }, [feedItemId]); // FIX: feedItemId is the only dep — loadComments is stable via useCallback
 
   // Auto-scroll when comments load or new one arrives
   useEffect(() => {

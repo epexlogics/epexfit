@@ -19,7 +19,7 @@ import { borderRadius, spacing } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTracking } from '../../context/TrackingContext';
-import { supabase } from '../../services/supabase';
+import { useActivityStore } from '../../store/activityStore';
 import dayjs from 'dayjs';
 import { formatPace, calculateSplits } from '../../utils/paceUtils';
 import { useUnitSystem, type UnitSystem } from '../../utils/units';
@@ -189,6 +189,7 @@ export default function ActivityScreen() {
   const { isTracking, steps, distance, calories, duration, locationPoints, startTracking, stopTracking, currentActivity } = useTracking();
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
+  const activityStore = useActivityStore();
   const unitSystem = useUnitSystem();
   const nav = useNavigation<any>();
   const insets = useSafeAreaInsets();
@@ -264,12 +265,9 @@ export default function ActivityScreen() {
           <HealthSyncWidget
             colors={colors}
             accent={color}
-            onStepsSynced={async (steps) => {
-              if (!user) return;
-              const today = dayjs().format('YYYY-MM-DD');
-              await supabase
-                .from('daily_logs')
-                .upsert({ user_id: user.id, date: today, steps }, { onConflict: 'user_id,date' });
+            onStepsSynced={(syncedSteps) => {
+              // Route through activityStore — single source of truth for steps
+              activityStore.setActivityMetrics({ steps: syncedSteps });
             }}
           />
         )}
