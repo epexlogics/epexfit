@@ -640,7 +640,8 @@ export default function HomeScreen({ navigation }: any) {
 
       // Add today's workouts from DB as feed items
       todayWorkouts.slice(0, 3).forEach((w) => {
-        const type = (w.type ?? 'other').toLowerCase();
+        // DB may return type as number/enum — primitives other than string have no .toLowerCase()
+        const type = String(w.type ?? 'other').toLowerCase();
         feedItems.push({
           id: `workout_${w.id}`,
           kind: 'workout',
@@ -655,10 +656,11 @@ export default function HomeScreen({ navigation }: any) {
 
       // Add food logs
       foodLogs.slice(0, 2).forEach((f) => {
+        const mealLabel = String(f.meal_type ?? 'meal');
         feedItems.push({
           id: `food_${f.id}`,
           kind: 'food',
-          title: `${(f.meal_type ?? 'meal').charAt(0).toUpperCase() + (f.meal_type ?? 'meal').slice(1)} logged`,
+          title: `${mealLabel.charAt(0).toUpperCase() + mealLabel.slice(1)} logged`,
           subtitle: `${f.calories} kcal`,
           icon: 'food-apple',
           color: '#FB923C',
@@ -957,7 +959,7 @@ export default function HomeScreen({ navigation }: any) {
   // ── Display badges ────────────────────────────────────────────────────────
   const displayBadges = BADGE_DEFINITIONS.slice(0, 6).map((b) => ({
     ...b,
-    unlocked: data?.unlockedBadgeIds.includes(b.id) ?? false,
+    unlocked: (data?.unlockedBadgeIds ?? []).includes(b.id),
   }));
 
   // ─────────────────────────────────────────────────────────────────────────

@@ -1,19 +1,24 @@
-// Credentials are loaded from environment variables.
-// Copy .env.example to .env and fill in your Supabase values.
-// For EAS builds, set these in eas.json under "env" or use EAS Secrets.
+// Credentials: EXPO_PUBLIC_* inlined at bundle time + `extra` from app.config.js
+// embedded in the native binary (reliable for EAS / release when Metro env differs).
 //
-// NOTE: process.env.EXPO_PUBLIC_* works in BOTH expo start (dev) AND EAS builds.
-// The previous Constants.expoConfig?.extra approach only worked in EAS builds —
-// in expo start the extra object was empty, causing silent auth failures.
+// Expo Go often works while APK fails when only one path is set — use both.
+
+import Constants from 'expo-constants';
+
+type ExpoExtra = {
+  supabaseUrl?: string;
+  supabasePublishableKey?: string;
+};
+
+const extra = (Constants.expoConfig?.extra ?? {}) as ExpoExtra;
 
 export const SUPABASE_URL: string =
-  process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+  process.env.EXPO_PUBLIC_SUPABASE_URL ?? extra.supabaseUrl ?? '';
 
-// Supabase's "anon" key is a publishable key — safe to embed in client apps.
-// It is rate-limited and subject to Row Level Security. Rename reflects its
-// true purpose and avoids confusion with server-side secret keys.
 export const SUPABASE_PUBLISHABLE_KEY: string =
-  process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
+  process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+  extra.supabasePublishableKey ??
+  '';
 
 export const APP_CONFIG = {
   appName: 'EpexFit',
