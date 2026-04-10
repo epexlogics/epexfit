@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
     borderRadius: 150,
     top: '50%',
     left: '50%',
-    marginTop: -190,
+    marginTop: -150,
     marginLeft: -150,
   },
   content: { alignItems: 'center', gap: 20 },

@@ -93,29 +93,28 @@ export default function OnboardingScreen({ navigation }: any) {
         return;
       }
 
-      // FIX (Issue 2): persist onboarding_complete to user profile so it survives
-      // reinstalls and new devices — AppNavigator checks this before AsyncStorage
-      await updateProfile({ height: h, weight: w, onboarding_complete: true } as any);
+      // Step 1: Save profile (non-fatal — AsyncStorage fallback handles navigation)
+      try {
+        await updateProfile({ height: h, weight: w, onboarding_complete: true } as any);
+      } catch (_) {
+        // ignored — AsyncStorage flag below is the source of truth for navigation
+      }
 
-      await AsyncStorage.setItem('user_fitness_goal', selectedGoal ?? '');
-      await AsyncStorage.setItem('user_fitness_level', selectedLevel ?? '');
-      await AsyncStorage.setItem('user_training_days', String(trainingDays));
-      await AsyncStorage.setItem('@epexfit_onboarding', JSON.stringify({
-        goal: selectedGoal,
-        level: selectedLevel,
-        trainingDays,
-        height: h,
-        weight: w,
-      }));
+      // Step 2: Save all local AsyncStorage keys
+      await AsyncStorage.multiSet([
+        ['user_fitness_goal', selectedGoal ?? ''],
+        ['user_fitness_level', selectedLevel ?? ''],
+        ['user_training_days', String(trainingDays)],
+        ['@epexfit_onboarding', JSON.stringify({ goal: selectedGoal, level: selectedLevel, trainingDays, height: h, weight: w })],
+        [STORAGE_KEYS.ONBOARDING, 'complete'],  // ← MUST be set before navigation
+      ]);
 
-      // FIX (Issue 4): goal creation is non-fatal — a network/RLS failure here
-      // should NOT prevent the user entering the app or trigger a confusing error alert
+      // Step 3: Default goals (non-fatal)
       try {
         const stepGoal = selectedLevel === 'beginner' ? 7000 : selectedLevel === 'intermediate' ? 10000 : 12000;
         const runGoal  = trainingDays >= 4 ? 10 : trainingDays >= 3 ? 7 : 5;
         const deadline30 = new Date(); deadline30.setDate(deadline30.getDate() + 30);
         const deadline90 = new Date(); deadline90.setDate(deadline90.getDate() + 90);
-
         await Promise.all([
           databaseService.saveGoal({ userId: user.id, type: 'steps',    target: stepGoal, current: 0, unit: 'steps',   startDate: new Date(), deadline: deadline30, completed: false }),
           databaseService.saveGoal({ userId: user.id, type: 'water',    target: 8,        current: 0, unit: 'glasses', startDate: new Date(), deadline: deadline30, completed: false }),
@@ -123,12 +122,10 @@ export default function OnboardingScreen({ navigation }: any) {
           databaseService.saveGoal({ userId: user.id, type: 'running',  target: runGoal,  current: 0, unit: 'km',      startDate: new Date(), deadline: deadline90, completed: false }),
         ]);
       } catch (goalError) {
-        // Goals will be creatable later from GoalsScreen — silently continue
         console.warn('[Onboarding] Default goals creation failed (non-fatal):', goalError);
       }
 
-      // Mark onboarding complete locally — AppNavigator reads this to skip onboarding
-      await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING, 'complete');
+      // Step 4: Navigate — AsyncStorage.ONBOARDING is already 'complete' above
       navigation.replace('Main');
 
     } catch (error) {

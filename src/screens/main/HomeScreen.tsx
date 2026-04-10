@@ -731,7 +731,7 @@ export default function HomeScreen({ navigation }: any) {
           title: `${(f.meal_type ?? 'meal').charAt(0).toUpperCase() + (f.meal_type ?? 'meal').slice(1)} logged`,
           subtitle: `${f.calories} kcal`,
           icon: 'food-apple',
-          color: colors.metricFood,
+          color: '#FB923C',
           createdAt: new Date(f.created_at),
           referenceId: f.id,
         });
@@ -869,7 +869,8 @@ export default function HomeScreen({ navigation }: any) {
     } catch (err: any) {
       setLoadError(err?.message ?? 'Failed to load data');
     }
-  }, [user, trackingSteps, trackingDist, trackingCal]);
+  }, [user, trackingSteps, trackingDist, trackingCal, colors]);
+
 
   // ── Initial load ──────────────────────────────────────────────────────────
   useEffect(() => {
