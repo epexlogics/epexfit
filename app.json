@@ -7,7 +7,7 @@
     "icon": "./src/assets/icon.png",
     "userInterfaceStyle": "automatic",
     "scheme": "epexfit",
-    "owner": "epexfit",
+    "owner": "epex-logics-llc",
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -94,7 +94,7 @@
     },
  "extra": {
     "eas": {
-      "projectId": "9ebc35ef-7d5e-48bb-bdc9-4bd93a26ddb9"
+      "projectId": "51b23955-8a3c-42a3-a0db-57f7c2efafa8"
     },
     "supabaseUrl": "https://yvmlnwoppiosbphfcmhe.supabase.co",
     "supabasePublishableKey": "sb_publishable_Piev8Q8GrxJBgqvPnWhmfA_nZniYBw6"
