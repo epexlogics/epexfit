@@ -17,9 +17,10 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import {
-  Alert, Platform, RefreshControl, ScrollView, StyleSheet,
+  Alert, Dimensions, Platform, RefreshControl, ScrollView, StyleSheet,
   Switch, Text, TouchableOpacity, View, Image, ActivityIndicator,
 } from 'react-native';
+const BADGE_COL_WIDTH = Math.floor((Dimensions.get('window').width - 32 - 32 - 24) / 4); // screen - scrollPadding(32) - cardPadding(32) - 3gaps(24)
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AppIcon from '../../components/AppIcon';
@@ -705,7 +706,7 @@ const s = StyleSheet.create({
 
   badgesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   badge: {
-    width: '18%', borderWidth: 1, borderRadius: 12,
+    width: BADGE_COL_WIDTH, borderWidth: 1, borderRadius: 12,
     paddingVertical: 10, alignItems: 'center', gap: 4,
   },
 

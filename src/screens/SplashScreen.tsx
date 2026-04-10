@@ -83,7 +83,7 @@ export default function SplashScreen() {
       <Animated.View
         style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}
       >
-        <Image source={require('../assets/logo.png')} style={{ width: 76, height: 76, resizeMode: 'contain' }} />
+        <Image source={require('../assets/logo.png')} style={{ width: 64, height: 64, resizeMode: 'contain' }} />
 
         <Text style={[styles.brand, { color: colors.text }]}>EPEXFIT</Text>
         <Animated.Text style={[styles.tagline, { opacity: taglineFade, color: colors.textSecondary }]}>
@@ -104,21 +104,24 @@ export default function SplashScreen() {
   );
 }
 
+// Circle size — big enough to contain all content comfortably
+const CIRCLE = Math.min(W * 0.78, 320);
+
 const styles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   bloom: {
     position: 'absolute',
-    width: 300,
-    height: 300,
-    borderRadius: 150,
+    width: CIRCLE,
+    height: CIRCLE,
+    borderRadius: CIRCLE / 2,
     top: '50%',
     left: '50%',
-    marginTop: -150,
-    marginLeft: -150,
+    marginTop: -(CIRCLE / 2),
+    marginLeft: -(CIRCLE / 2),
   },
-  content: { alignItems: 'center', gap: 20 },
-  brand: { fontSize: 30, fontWeight: '900', letterSpacing: 10, marginTop: 8 },
-  tagline: { fontSize: 14, fontWeight: '600', letterSpacing: 0.2 },
+  content: { alignItems: 'center', gap: 14 },
+  brand: { fontSize: 26, fontWeight: '900', letterSpacing: 7, marginTop: 4 },
+  tagline: { fontSize: 13, fontWeight: '600', letterSpacing: 0.2, textAlign: 'center', paddingHorizontal: 24 },
   dotsWrap: { position: 'absolute', bottom: 88, flexDirection: 'row', gap: 10 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   version: { position: 'absolute', bottom: 48, fontSize: 11, fontWeight: '600', letterSpacing: 0.4 },
