@@ -781,18 +781,18 @@ export default function HomeScreen({ navigation }: any) {
       // FIX: try/catch around both — if either throws synchronously before
       // returning a Promise, .catch() won't fire and it crashes all of loadData
       try {
-        sendSmartNotifications({
-          stepsToday: activityStore.steps,
-          stepGoal,
-          streak: currentStreak,
-          distanceToday: weeklyDistance,
-          distanceGoal: distGoal,
-          waterToday: waterStore.glasses,
-          waterGoal: DEFAULT_WATER_GOAL,
-        }).catch(() => {});
+        if (typeof sendSmartNotifications === 'function') {
+          sendSmartNotifications({
+            stepsToday: activityStore.steps,
+            stepGoal,
+            streak: currentStreak,
+            distanceToday: weeklyDistance,
+            distanceGoal: distGoal,
+            waterToday: waterStore.glasses,
+            waterGoal: DEFAULT_WATER_GOAL,
+          }).catch(() => {});
+        }
       } catch {}
-
-      // ── Goal progress sync in background ─────────────────────────────────
       try { databaseService.syncGoalProgress(user.id).catch(() => {}); } catch {}
 
     } catch (err: any) {

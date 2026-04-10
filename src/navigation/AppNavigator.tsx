@@ -36,11 +36,11 @@ function OnboardingBackGuard() {
   return null;
 }
 
-function GuardedOnboarding() {
+function GuardedOnboarding({ navigation }: any) {
   return (
     <>
       <OnboardingBackGuard />
-      <OnboardingScreen />
+      <OnboardingScreen navigation={navigation} />
     </>
   );
 }
