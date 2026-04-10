@@ -52,7 +52,7 @@ export default function AnimatedProgressRing({
     Animated.timing(animatedProgress, {
       toValue: Math.min(Math.max(progress, 0), 1),
       duration,
-      useNativeDriver: true,
+      useNativeDriver: false, // SVG properties don't support native driver
     }).start();
   }, [progress, duration]);
 

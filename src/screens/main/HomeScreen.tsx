@@ -1117,16 +1117,16 @@ export default function HomeScreen({ navigation }: any) {
       >
         {/* ─── 1. HEADER ──────────────────────────────────────────────── */}
         <View style={styles.header}>
-          <View>
+          <View style={{ flex: 1, minWidth: 0, marginRight: 10 }}>
             <Text style={[styles.greeting, { color: colors.textSecondary }]}>
               {getGreeting()}
             </Text>
-            <Text style={[styles.userName, { color: colors.text }]}>
+            <Text style={[styles.userName, { color: colors.text }]} numberOfLines={1} ellipsizeMode="tail">
               {user?.fullName?.split(' ')[0] || 'Athlete'} 👋
             </Text>
           </View>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 }}>
             {/* Streak badge */}
             {(data?.currentStreak ?? 0) > 0 && (
               <View
@@ -1195,29 +1195,34 @@ export default function HomeScreen({ navigation }: any) {
                         value={apsResult.total}
                         duration={1200}
                         style={[
-                          typography.displayMedium,
+                          { fontSize: 42, fontWeight: '900', letterSpacing: -1.5 },
                           { color: isNewUser ? accent : apsResult.color },
                         ]}
                       />
                       <Text
                         style={[
-                          typography.titleMedium,
+                          { fontSize: 14, fontWeight: '500' },
                           { color: colors.textSecondary, marginLeft: 2 },
                         ]}
                       >
                         {' '}/ 100
                       </Text>
                     </View>
-                    <Text style={[typography.label, { color: colors.textSecondary, marginTop: 4 }]}>
+                    <Text style={[typography.label, { color: colors.textSecondary, marginTop: 2 }]}>
                       APS SCORE
                     </Text>
                     <Text
-                      style={[
-                        typography.bodyBold,
-                        { color: isNewUser ? colors.textSecondary : apsResult.color, marginTop: 2 },
-                      ]}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: '600',
+                        color: isNewUser ? colors.textSecondary : apsResult.color,
+                        marginTop: 2,
+                        textAlign: 'center',
+                        maxWidth: 120,
+                      }}
+                      numberOfLines={2}
                     >
-                      {isNewUser ? 'Your baseline — log to build' : apsResult.label}
+                      {isNewUser ? 'Log to build your score' : apsResult.label}
                     </Text>
                   </View>
                 </AnimatedProgressRing>
@@ -1254,31 +1259,34 @@ export default function HomeScreen({ navigation }: any) {
             </>
 
             {isNewUser && (
-              <View style={[styles.newUserBanner, { backgroundColor: accent + '14', borderColor: accent + '35' }]}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: accent, marginBottom: 8, textAlign: 'center' }}>
+              <View style={[styles.newUserBanner, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 12, textAlign: 'center', letterSpacing: 0.3 }}>
                   🏁  Start logging to activate your APS score
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TouchableOpacity
                     onPress={() => navigation.navigate('Workouts')}
                     activeOpacity={0.82}
-                    style={[styles.newUserBtn, { backgroundColor: accent }]}
+                    style={[styles.newUserBtn, { backgroundColor: accent, borderWidth: 0 }]}
                   >
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>💪 Log Workout</Text>
+                    <Text style={{ fontSize: 13 }}>💪</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff', marginTop: 3 }}>Workout</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => navigation.navigate('FoodLog')}
                     activeOpacity={0.82}
-                    style={[styles.newUserBtn, { backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: accent + '60' }]}
+                    style={[styles.newUserBtn, { backgroundColor: accent + '15', borderWidth: 1, borderColor: accent + '40' }]}
                   >
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: accent }}>🥗 Log Food</Text>
+                    <Text style={{ fontSize: 13 }}>🥗</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: accent, marginTop: 3 }}>Food</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => navigation.navigate('Goals')}
                     activeOpacity={0.82}
-                    style={[styles.newUserBtn, { backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: accent + '60' }]}
+                    style={[styles.newUserBtn, { backgroundColor: accent + '15', borderWidth: 1, borderColor: accent + '40' }]}
                   >
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: accent }}>🎯 Goals</Text>
+                    <Text style={{ fontSize: 13 }}>🎯</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: accent, marginTop: 3 }}>Goals</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -2075,10 +2083,11 @@ const styles = StyleSheet.create({
   },
   newUserBtn: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: borderRadius.full,
+    paddingVertical: 12,
+    borderRadius: borderRadius.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'column',
   },
   // Setup card (new user — no data yet)
   setupCard: {

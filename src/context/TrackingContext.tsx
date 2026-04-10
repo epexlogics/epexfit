@@ -133,9 +133,14 @@ export const TrackingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   // Restore in-progress session after app restart
+  // Also reset state when user changes (account switch) so stale data doesn't bleed
   useEffect(() => {
     const restore = async () => {
       try {
+        // If user changed, wipe state first so previous account's data doesn't show
+        setState(initialState);
+        lastStepsRef.current = 0;
+
         const hasBg = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
         const sessionRaw = await AsyncStorage.getItem(TRACKING_SESSION_KEY);
         if (!hasBg || !sessionRaw) return;

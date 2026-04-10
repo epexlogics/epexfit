@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from '../types';
 import { authService } from '../services/auth';
 import { clearAuthUserCache } from '../services/database';
@@ -116,6 +117,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await authService.signOut();
       clearAuthUserCache(); // Immediately invalidate DB-layer auth cache
+      // Clear all cached Supabase query data so next account gets fresh data
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const cacheKeys = keys.filter(k => k.startsWith('@epexfit_cache'));
+        if (cacheKeys.length) await AsyncStorage.multiRemove(cacheKeys);
+      } catch {}
       setUser(null);
     } catch (err: any) {
       setError(err.message);
