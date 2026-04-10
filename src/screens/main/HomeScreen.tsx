@@ -867,7 +867,10 @@ export default function HomeScreen({ navigation }: any) {
       databaseService.syncGoalProgress(user.id).catch(() => {});
 
     } catch (err: any) {
-      setLoadError(err?.message ?? 'Failed to load data');
+      // Production APK debugging: full error details
+      const msg = err?.message ?? String(err) ?? 'Failed to load data';
+      console.error('[HomeScreen] loadData crash:', msg, err?.stack ?? '');
+      setLoadError(msg);
     }
   }, [user, trackingSteps, trackingDist, trackingCal, colors]);
 

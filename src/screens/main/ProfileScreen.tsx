@@ -20,7 +20,9 @@ import {
   Alert, Dimensions, Platform, RefreshControl, ScrollView, StyleSheet,
   Switch, Text, TouchableOpacity, View, Image, ActivityIndicator,
 } from 'react-native';
-const BADGE_COL_WIDTH = Math.floor((Dimensions.get('window').width - 32 - 32 - 24) / 4); // screen - scrollPadding(32) - cardPadding(32) - 3gaps(24)
+// Badge grid: 4 columns, screen padding=16 each side, card padding=16 each side, 3 gaps of 8px
+// Total horizontal space used = 16+16 (scroll) + 16+16 (card) + 3*8 (gaps) = 88px
+const BADGE_COL_WIDTH = Math.floor((Dimensions.get('window').width - 88) / 4);
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AppIcon from '../../components/AppIcon';
@@ -706,7 +708,8 @@ const s = StyleSheet.create({
 
   badgesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   badge: {
-    width: BADGE_COL_WIDTH, borderWidth: 1, borderRadius: 12,
+    width: BADGE_COL_WIDTH,
+    borderWidth: 1, borderRadius: 12,
     paddingVertical: 10, alignItems: 'center', gap: 4,
   },
 

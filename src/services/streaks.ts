@@ -32,8 +32,10 @@ export function clearStreakAuthCache() {
  */
 export async function recalculateStreak(userId: string): Promise<number> {
   try {
-    const authUser = await getAuthUser();
-    if (!authUser) return 0;
+    // PRODUCTION FIX: userId already passed by caller — no internal getAuthUser()
+    // needed. Production APK cold-start par supabase.auth.getUser() async hota hai
+    // aur race condition se null return kar sakta hai, causing a crash.
+    if (!userId) return 0;
 
     const today = new Date().toISOString().split('T')[0];
     const ago365 = new Date();
@@ -45,13 +47,13 @@ export async function recalculateStreak(userId: string): Promise<number> {
       supabase
         .from('daily_logs')
         .select('date, steps')
-        .eq('user_id', authUser.id)
+        .eq('user_id', userId)
         .gte('date', ago365Str)
         .order('date', { ascending: false }),
       supabase
         .from('workouts')
         .select('date')
-        .eq('user_id', authUser.id)
+        .eq('user_id', userId)
         .gte('date', ago365Str),
     ]);
 
@@ -131,8 +133,8 @@ export async function getCachedStreak(): Promise<number> {
  */
 export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIONS> {
   try {
-    const authUser = await getAuthUser();
-    if (!authUser) return [];
+    // PRODUCTION FIX: use passed userId directly
+    if (!userId) return [];
 
     // PERF FIX: read from cache — recalculateStreak runs separately in background
     const streak = await getCachedStreak();
@@ -140,7 +142,7 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
     const { data: activities } = await supabase
       .from('activities')
       .select('type, distance, steps, start_time')
-      .eq('user_id', authUser.id);
+      .eq('user_id', userId);
 
     const acts = activities ?? [];
     const totalDistanceKm = acts.reduce((s: number, a: any) => s + (a.distance ?? 0), 0);
@@ -180,7 +182,7 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
     const { data: existing } = await supabase
       .from('user_badges')
       .select('badge_id')
-      .eq('user_id', authUser.id);
+      .eq('user_id', userId);
 
     const alreadyUnlocked = new Set((existing ?? []).map((b: any) => b.badge_id));
     const newBadgeIds = earnedIds.filter((id) => !alreadyUnlocked.has(id));
@@ -188,7 +190,7 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
     if (newBadgeIds.length > 0) {
       await supabase.from('user_badges').insert(
         newBadgeIds.map((badge_id) => ({
-          user_id: authUser.id,
+          user_id: userId,
           badge_id,
           unlocked_at: new Date().toISOString(),
         }))
@@ -211,12 +213,12 @@ export async function syncBadges(userId: string): Promise<typeof BADGE_DEFINITIO
 /** Fetch all unlocked badge IDs for a user */
 export async function getUnlockedBadgeIds(userId: string): Promise<string[]> {
   try {
-    const authUser = await getAuthUser();
-    if (!authUser) return [];
+    // PRODUCTION FIX: use passed userId directly
+    if (!userId) return [];
     const { data } = await supabase
       .from('user_badges')
       .select('badge_id')
-      .eq('user_id', authUser.id);
+      .eq('user_id', userId);
     return (data ?? []).map((b: any) => b.badge_id);
   } catch {
     return [];
