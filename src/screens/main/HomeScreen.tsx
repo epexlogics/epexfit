@@ -470,6 +470,16 @@ export default function HomeScreen({ navigation }: any) {
       const weekEnd = dayjs().format('YYYY-MM-DD');
 
       // ── Parallel fetches ─────────────────────────────────────────────────
+      const streakPromise =
+        typeof recalculateStreak === 'function'
+          ? recalculateStreak(user.id)
+          : Promise.resolve(0);
+
+      const badgePromise =
+        typeof getUnlockedBadgeIds === 'function'
+          ? getUnlockedBadgeIds(user.id)
+          : Promise.resolve([]);
+
       const [
         profileResult,
         workoutsResult,
@@ -490,8 +500,8 @@ export default function HomeScreen({ navigation }: any) {
         supabase.from('user_achievements').select('id, achievement_type, earned_at').eq('user_id', user.id).order('earned_at', { ascending: false }).limit(10),
         databaseService.getDailyLog(user.id, new Date()),
         databaseService.getGoals(user.id),
-        recalculateStreak(user.id),
-        getUnlockedBadgeIds(user.id),
+        streakPromise,
+        badgePromise,
       ]);
 
       // ── Extract results safely ────────────────────────────────────────────

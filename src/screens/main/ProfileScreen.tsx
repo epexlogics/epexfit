@@ -29,7 +29,9 @@ import AppIcon from '../../components/AppIcon';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { databaseService } from '../../services/database';
-import { storageService } from '../../services/storage';
+import { StorageService } from '../../services/storage';
+
+const storageService = new StorageService();
 import { supabase } from '../../services/supabase';
 import { recalculateStreak, getUnlockedBadgeIds } from '../../services/streaks';
 import { socialService, FollowCounts } from '../../services/socialService';
@@ -132,14 +134,19 @@ export default function ProfileScreen() {
   const [notifSettings, setNotifSettings] = useState<NotifSettings>(DEFAULT_NOTIF);
   const [notifSaving, setNotifSaving]     = useState(false);
 
+  
+
   // ── Load all data ──────────────────────────────────────────────────────
+
+  const safeCall = (fn: Function | undefined, fallback: any) =>
+    typeof fn === 'function' ? fn(user!.id) : Promise.resolve(fallback);
 
   const loadData = useCallback(async () => {
     if (!user) return;
 
     const [streakVal, badgeIds, counts, privacy] = await Promise.all([
-      recalculateStreak(user.id),
-      getUnlockedBadgeIds(user.id),
+      safeCall(recalculateStreak, 0),
+      safeCall(getUnlockedBadgeIds, []),
       socialService.getFollowCounts(user.id),
       socialService.getProfilePrivacy(),
     ]);
