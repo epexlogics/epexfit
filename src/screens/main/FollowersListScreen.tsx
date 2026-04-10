@@ -1,4 +1,4 @@
-/**
+﻿/**
  * FollowersListScreen — Real followers / following list
  *
  * Fixes:
@@ -125,7 +125,7 @@ export default function FollowersListScreen() {
     <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={['top']}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={[s.backText, { color: accent }]}>← Back</Text>
+          <Text style={[s.backText, { color: accent }]}>Back</Text>
         </TouchableOpacity>
         <Text style={[s.title, { color: colors.text }]} numberOfLines={1}>{title}</Text>
         {!loading && (

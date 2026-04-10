@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DirectMessagesScreen — Real-time conversation inbox
  *
  * ✅ Real Supabase data via dmService.getConversations()
@@ -169,7 +169,7 @@ export default function DirectMessagesScreen() {
           onPress={() => navigation.goBack()}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <Text style={{ fontSize: 22, color: colors.text }}>←</Text>
+          <Text style={{ fontSize: 22, color: colors.text }}>Back</Text>
         </TouchableOpacity>
         <Text style={[dS.title, { color: colors.text }]}>Messages</Text>
         <TouchableOpacity

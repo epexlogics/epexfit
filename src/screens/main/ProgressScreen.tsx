@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ProgressScreen — Fixed
  *
  * Bugs fixed:
@@ -757,7 +757,7 @@ export default function ProgressScreen() {
                     onPress={() => navigation.navigate('BodyMeasurements')}
                     style={[styles.ctaButton, { backgroundColor: colors.primary + '20', borderColor: colors.primary + '60' }]}
                   >
-                    <Text style={[styles.ctaButtonText, { color: colors.primary }]}>Log Body Measurements →</Text>
+                    <Text style={[styles.ctaButtonText, { color: colors.primary }]}>Log Body Measurements ></Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -829,7 +829,7 @@ export default function ProgressScreen() {
                   onPress={() => navigation.navigate('BodyMeasurements')}
                   style={[styles.ctaButton, { backgroundColor: colors.primary + '20', borderColor: colors.primary + '60', marginTop: 12 }]}
                 >
-                  <Text style={[styles.ctaButtonText, { color: colors.primary }]}>Add Measurement →</Text>
+                  <Text style={[styles.ctaButtonText, { color: colors.primary }]}>Add Measurement ></Text>
                 </TouchableOpacity>
               </View>
             )}

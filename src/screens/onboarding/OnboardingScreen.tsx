@@ -1,4 +1,4 @@
-/**
+﻿/**
  * OnboardingScreen — Upgraded to 4-step goal-setting wizard
  * Step 1: Welcome + goal type
  * Step 2: Fitness level
@@ -102,30 +102,24 @@ export default function OnboardingScreen({ navigation }: any) {
         [STORAGE_KEYS.ONBOARDING, 'complete'],
       ]);
 
-      // Step 3: Update Supabase profile — do this BEFORE navigating
-      // so AppNavigator sees onboarding_complete=true on next check
-      try {
-        await updateProfile({ height: h, weight: w, onboarding_complete: true } as any);
-      } catch (_) {}
+      // Step 3: Navigate immediately — don't wait for Supabase calls
+      navigation.replace('Main');
 
-      // Step 4: Default goals (non-fatal)
+      // Step 4: Update profile + goals in background (non-blocking)
+      updateProfile({ height: h, weight: w, onboarding_complete: true } as any).catch(() => {});
+
       try {
         const stepGoal = selectedLevel === 'beginner' ? 7000 : selectedLevel === 'intermediate' ? 10000 : 12000;
         const runGoal  = trainingDays >= 4 ? 10 : trainingDays >= 3 ? 7 : 5;
         const deadline30 = new Date(); deadline30.setDate(deadline30.getDate() + 30);
         const deadline90 = new Date(); deadline90.setDate(deadline90.getDate() + 90);
-        await Promise.all([
+        Promise.all([
           databaseService.saveGoal({ userId: user.id, type: 'steps',    target: stepGoal, current: 0, unit: 'steps',   startDate: new Date(), deadline: deadline30, completed: false }),
           databaseService.saveGoal({ userId: user.id, type: 'water',    target: 8,        current: 0, unit: 'glasses', startDate: new Date(), deadline: deadline30, completed: false }),
           databaseService.saveGoal({ userId: user.id, type: 'calories', target: 500,      current: 0, unit: 'kcal',    startDate: new Date(), deadline: deadline30, completed: false }),
           databaseService.saveGoal({ userId: user.id, type: 'running',  target: runGoal,  current: 0, unit: 'km',      startDate: new Date(), deadline: deadline90, completed: false }),
-        ]);
-      } catch (goalError) {
-        console.warn('[Onboarding] Default goals creation failed (non-fatal):', goalError);
-      }
-
-      // Step 5: Navigate — navigation prop is now correctly passed from AppNavigator
-      navigation.replace('Main');
+        ]).catch(() => {});
+      } catch {}
 
     } catch (error) {
       // FIX (Issue 4): only show one alert even if multiple async ops reject
@@ -292,13 +286,13 @@ export default function OnboardingScreen({ navigation }: any) {
             style={[styles.btn, { backgroundColor: canProceed() ? accent : colors.border }]}
           >
             <Text style={[styles.btnText, { color: canProceed() ? colors.onPrimary : colors.textDisabled }]}>
-              {saving ? 'Setting up…' : step < STEPS.length - 1 ? 'Continue →' : "Let's go 🚀"}
+              {saving ? 'Setting up…' : step < STEPS.length - 1 ? 'Continue >' : "Let's go 🚀"}
             </Text>
           </TouchableOpacity>
 
           {step > 0 && (
             <TouchableOpacity onPress={() => setStep(step - 1)} style={styles.backBtn}>
-              <Text style={[styles.backText, { color: colors.textSecondary }]}>← Back</Text>
+              <Text style={[styles.backText, { color: colors.textSecondary }]}>Back</Text>
             </TouchableOpacity>
           )}
         </ScrollView>

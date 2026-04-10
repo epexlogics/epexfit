@@ -729,18 +729,18 @@ export default function HomeScreen({ navigation }: any) {
       }
 
       // ── Sync badges in background ─────────────────────────────────────────
-      syncBadges(user.id)
-        .then((newBadges) => {
-          if (newBadges.length > 0) {
-            setCelebBadge(newBadges[0]);
-            notifyBadgeUnlocked(newBadges[0].label, newBadges[0].icon).catch(() => {});
-          }
-        })
-        .catch(() => {});
-
-      // ── Assemble final data object ────────────────────────────────────────
-      setData({
-        avatarUrl,
+      try {
+        syncBadges(user.id)
+          .then((newBadges) => {
+            if (newBadges.length > 0) {
+              setCelebBadge(newBadges[0]);
+              if (typeof notifyBadgeUnlocked === 'function') {
+                notifyBadgeUnlocked(newBadges[0].label, newBadges[0].icon).catch(() => {});
+              }
+            }
+          })
+          .catch(() => {});
+      } catch {}
         stepsToday,
         caloriesToday,
         distanceToday,
@@ -801,7 +801,7 @@ export default function HomeScreen({ navigation }: any) {
       console.error('[HomeScreen] loadData crash:', msg, err?.stack ?? '');
       setLoadError(msg);
     }
-  }, [user, activityStore.steps, activityStore.distance, activityStore.calories, waterStore.glasses, sleepStore.hours, moodStore.rating, colors]);
+  }, [user]);
 
 
   // ── Initial load ──────────────────────────────────────────────────────────

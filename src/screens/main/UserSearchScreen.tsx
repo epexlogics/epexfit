@@ -1,4 +1,4 @@
-/**
+﻿/**
  * UserSearchScreen — Real Supabase user search
  *
  * Fixes:
@@ -146,7 +146,7 @@ export default function UserSearchScreen() {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={[s.backText, { color: accent }]}>← Back</Text>
+          <Text style={[s.backText, { color: accent }]}>Back</Text>
         </TouchableOpacity>
         <Text style={[s.title, { color: colors.text }]}>Find People</Text>
       </View>

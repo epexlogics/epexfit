@@ -156,30 +156,30 @@ export class StorageService {
       return { url: null, error };
     }
   }
-  // Upload image for social posts — uses avatars bucket with decode() for correct binary upload
+  // Upload image for social posts — uses activity-photos bucket with decode() for correct binary
   async uploadPostImage(userId: string, photoUri: string): Promise<{ url: string | null; error: any }> {
     try {
       const ext = (photoUri.split('.').pop() ?? 'jpg').toLowerCase().replace(/\?.*$/, '');
       const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? ext : 'jpg';
-      const fileName = `posts/${userId}/post_${Date.now()}.${safeExt}`;
+      const fileName = `${userId}/post_${Date.now()}.${safeExt}`;
+      const contentType = `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`;
 
-      let fileData: string | Blob;
       if (Platform.OS === 'web') {
         const response = await fetch(photoUri);
-        fileData = await response.blob();
+        const blob = await response.blob();
         const { error } = await supabase.storage
-          .from('avatars')
-          .upload(fileName, fileData, { contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`, upsert: false });
+          .from(BUCKET_NAME)
+          .upload(fileName, blob, { contentType, upsert: false });
         if (error) throw error;
       } else {
         const base64 = await FileSystem.readAsStringAsync(photoUri, { encoding: FileSystem.EncodingType.Base64 });
         const { error } = await supabase.storage
-          .from('avatars')
-          .upload(fileName, decode(base64), { contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`, upsert: false });
+          .from(BUCKET_NAME)
+          .upload(fileName, decode(base64), { contentType, upsert: false });
         if (error) throw error;
       }
 
-      const { data: publicUrl } = supabase.storage.from('avatars').getPublicUrl(fileName);
+      const { data: publicUrl } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
       return { url: publicUrl.publicUrl, error: null };
     } catch (error) {
       return { url: null, error };

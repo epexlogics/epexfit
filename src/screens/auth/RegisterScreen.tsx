@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Platform,
   ScrollView, StyleSheet, Text, Image, TextInput, TouchableOpacity, View, StatusBar,
@@ -138,7 +138,7 @@ export default function RegisterScreen({ navigation }: any) {
           }
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setAwaitingConfirmation(false)} style={{ marginTop: 20 }}>
-          <Text style={{ color: colors.textDisabled, fontSize: 13, fontWeight: '600' }}>← Back to registration</Text>
+          <Text style={{ color: colors.textDisabled, fontSize: 13, fontWeight: '600' }}>Back to registration</Text>
         </TouchableOpacity>
       </View>
     );

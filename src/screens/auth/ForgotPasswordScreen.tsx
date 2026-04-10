@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
   ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, StatusBar,
@@ -44,7 +44,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
       <ScrollView contentContainerStyle={[styles.scroll, { }]} showsVerticalScrollIndicator={false}>
 
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={[styles.backText, { color: accent }]}>← Back</Text>
+          <Text style={[styles.backText, { color: accent }]}>Back</Text>
         </TouchableOpacity>
 
         {sent ? (
