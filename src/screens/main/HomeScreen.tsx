@@ -449,6 +449,7 @@ export default function HomeScreen({ navigation }: any) {
 
     try {
       setLoadError(null);
+      console.log('[DEBUG] loadData step 1: start');
 
       // ── Week bounds ───────────────────────────────────────────────────────
       const now = new Date();
@@ -472,6 +473,7 @@ export default function HomeScreen({ navigation }: any) {
         goalsResult,
         streakResult,
         badgeIdsResult,
+      console.log('[DEBUG] loadData step 2: before Promise.allSettled');
       ] = await Promise.allSettled([
         // 1. Profile (avatar_url)
         supabase
@@ -558,6 +560,7 @@ export default function HomeScreen({ navigation }: any) {
         getUnlockedBadgeIds(user.id),
       ]);
 
+      console.log('[DEBUG] loadData step 3: after Promise.allSettled');
       // ── Extract results safely ────────────────────────────────────────────
       const profile =
         profileResult.status === 'fulfilled' ? profileResult.value.data : null;
@@ -690,6 +693,7 @@ export default function HomeScreen({ navigation }: any) {
       });
 
       // Also pull distance from activities this week for accurate km
+      console.log('[DEBUG] loadData step 4: before activitiesWeek');
       const { data: activitiesWeek } = await supabase
         .from('activities')
         .select('distance, start_time')
@@ -701,6 +705,7 @@ export default function HomeScreen({ navigation }: any) {
         weeklyDistance += a.distance ?? 0;
       });
 
+      console.log('[DEBUG] loadData step 5: after activitiesWeek');
       const weeklyWorkoutCount = workouts.length;
 
       // ── Best streak from achievements ─────────────────────────────────────
@@ -785,6 +790,7 @@ export default function HomeScreen({ navigation }: any) {
       const completedWorkoutsThisWeek = weeklyWorkoutCount;
 
       // ── Insight ───────────────────────────────────────────────────────────
+      console.log('[DEBUG] loadData step 6: before getWeeklyStepsByDay');
       const weeklySteps = await databaseService.getWeeklyStepsByDay(user.id, new Date(weekStart));
       const bestDaySteps = Array.isArray(weeklySteps) && weeklySteps.length > 0
         ? Math.max(...weeklySteps)
@@ -803,6 +809,7 @@ export default function HomeScreen({ navigation }: any) {
 
       // ── Weekly snapshot ───────────────────────────────────────────────────
       let snapshotData = null;
+      console.log('[DEBUG] loadData step 7: before shouldShowWeeklySnapshot');
       if (await shouldShowWeeklySnapshot()) {
         snapshotData = {
           totalSteps: stepsToday,
@@ -816,6 +823,7 @@ export default function HomeScreen({ navigation }: any) {
         };
       }
 
+      console.log('[DEBUG] loadData step 8: before syncBadges');
       // ── Sync badges in background ─────────────────────────────────────────
       syncBadges(user.id)
         .then((newBadges) => {
@@ -827,6 +835,7 @@ export default function HomeScreen({ navigation }: any) {
         .catch(() => {});
 
       // ── Assemble final data object ────────────────────────────────────────
+      console.log('[DEBUG] loadData step 9: before setData');
       setData({
         avatarUrl,
         stepsToday,
